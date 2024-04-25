@@ -37,4 +37,5 @@ model:
     norm_args:
       norm: 'bn'
 
-batch_size: 8
+batch_size: 1
+epochs: 2

@@ -32,13 +32,13 @@ model:
     NAME: PointNextDecoder
   cls_args:
     NAME: SegHead
-    num_classes: 13     # -----
+    num_classes: 3     # -----
     in_channels: null
     norm_args:
       norm: 'bn'
 
 batch_size: 8           # -----
-epochs: 2               # -----
+epochs: 10               # -----
 
 # do not conduct rotation in small model.
 datatransforms:
