@@ -49,7 +49,6 @@ def generate_data_list(cfg):
 
 
 def load_data(data_path, cfg):
-
     data = np.load(data_path)  # xyzrgbl, N*7
     coord, feat, label = data[:, :3], data[:, 3:6], data[:, 6]
     feat = np.clip(feat / 255., 0, 1).astype(np.float32)
@@ -195,7 +194,7 @@ def main(gpu, cfg):
                                              split='train',
                                              distributed=cfg.distributed,
                                              )
-    logging.info(f"length of training dataset: {len(train_loader.dataset)}")      # TODO CHECK
+    logging.info(f"length of training dataset: {len(train_loader.dataset)}")
 
     cfg.criterion_args.weight = None
     if cfg.get('cls_weighed_loss', False):
