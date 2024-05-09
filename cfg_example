@@ -1,0 +1,135 @@
+dist_url: tcp://localhost:8888
+dist_backend: nccl
+multiprocessing_distributed: False
+ngpus_per_node: 1
+world_size: 1
+launcher: mp
+local_rank: 0
+use_gpu: True
+seed: 8314
+epoch: 0
+epochs: 10
+ignore_index: None
+val_fn: validate
+deterministic: False
+sync_bn: False
+criterion_args:
+  NAME: CrossEntropy
+  label_smoothing: 0.2
+use_mask: False
+grad_norm_clip: 10
+layer_decay: 0
+step_per_update: 1
+start_epoch: 1
+sched_on_epoch: True
+wandb:
+  use_wandb: False
+  project: PointNeXt-S3DIS
+  tags: ['s3dis', 'train', 'pointnext-s-pipes', 'ngpus1']
+  name: s3dis-train-pointnext-s-pipes-ngpus1-20240425-131239-DsRDLdSZuR3DbJDnJ8mUcq
+use_amp: False
+use_voting: False
+val_freq: 1
+resume: False
+test: False
+finetune: False
+mode: train
+logname: None
+load_path: None
+print_freq: 50
+save_freq: -1
+root_dir: log/s3dis
+pretrained_path: None
+datatransforms:
+  train: ['ChromaticAutoContrast', 'PointsToTensor', 'PointCloudScaling', 'PointCloudXYZAlign', 'PointCloudJitter', 'ChromaticDropGPU', 'ChromaticNormalize']
+  val: ['PointsToTensor', 'PointCloudXYZAlign', 'ChromaticNormalize']
+  vote: ['ChromaticDropGPU']
+  kwargs:
+    color_drop: 0.2
+    gravity_dim: 2
+    scale: [0.9, 1.1]
+    angle: [0, 0, 1]
+    jitter_sigma: 0.005
+    jitter_clip: 0.02
+feature_keys: x,heights
+dataset:
+  common:
+    NAME: S3DIS
+    data_root: data/S3DIS/s3disfull
+    test_area: 5
+    voxel_size: 0.04
+  train:
+    split: train
+    voxel_max: 24000
+    loop: 30
+    presample: False
+  val:
+    split: val
+    voxel_max: None
+    presample: True
+  test:
+    split: test
+    voxel_max: None
+    presample: False
+num_classes: 13
+batch_size: 8
+val_batch_size: 1
+dataloader:
+  num_workers: 6
+cls_weighed_loss: False
+optimizer:
+  NAME: adamw
+  weight_decay: 0.0001
+sched: cosine
+warmup_epochs: 0
+min_lr: 1e-05
+lr: 0.01
+log_dir: log/s3dis/s3dis-train-pointnext-s-pipes-ngpus1-20240425-131239-DsRDLdSZuR3DbJDnJ8mUcq
+model:
+  NAME: BaseSeg
+  encoder_args:
+    NAME: PointNextEncoder
+    blocks: [1, 1, 1, 1, 1]
+    strides: [1, 4, 4, 4, 4]
+    sa_layers: 2
+    sa_use_res: True
+    width: 32
+    in_channels: 4
+    expansion: 4
+    radius: 0.1
+    nsample: 32
+    aggr_args:
+      feature_type: dp_fj
+      reduction: max
+    group_args:
+      NAME: ballquery
+      normalize_dp: True
+    conv_args:
+      order: conv-norm-act
+    act_args:
+      act: relu
+    norm_args:
+      norm: bn
+  decoder_args:
+    NAME: PointNextDecoder
+  cls_args:
+    NAME: SegHead
+    num_classes: 3
+    in_channels: None
+    norm_args:
+      norm: bn
+raw_root: data/pipes/pool/
+rank: 0
+distributed: False
+mp: False
+task_name: s3dis
+cfg_basename: pointnext-s-pipes
+opts: 
+is_training: True
+run_name: s3dis-train-pointnext-s-pipes-ngpus1-20240425-131239-DsRDLdSZuR3DbJDnJ8mUcq
+run_dir: log/s3dis/s3dis-train-pointnext-s-pipes-ngpus1-20240425-131239-DsRDLdSZuR3DbJDnJ8mUcq
+exp_dir: log/s3dis/s3dis-train-pointnext-s-pipes-ngpus1-20240425-131239-DsRDLdSZuR3DbJDnJ8mUcq
+ckpt_dir: log/s3dis/s3dis-train-pointnext-s-pipes-ngpus1-20240425-131239-DsRDLdSZuR3DbJDnJ8mUcq/checkpoint
+log_path: log/s3dis/s3dis-train-pointnext-s-pipes-ngpus1-20240425-131239-DsRDLdSZuR3DbJDnJ8mUcq/s3dis-train-pointnext-s-pipes-ngpus1-20240425-131239-DsRDLdSZuR3DbJDnJ8mUcq.log
+cfg_path: log/s3dis/s3dis-train-pointnext-s-pipes-ngpus1-20240425-131239-DsRDLdSZuR3DbJDnJ8mUcq/cfg.yaml
+

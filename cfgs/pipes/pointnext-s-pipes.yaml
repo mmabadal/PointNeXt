@@ -2,12 +2,12 @@
 dataset:
   common:
     NAME: PIPES
-    data_root: data/pipes/pool
+#    data_root: data/pipes/pool/test
     voxel_size: 0.04
   train:
     split: train
     voxel_max: 24000
-    loop: 30  # here, the training has been looped 30 times. therefore, the training epochs do not need much.
+    loop: 30  # here, the training has been looped 30 times. therefore, the training epochs do not need much. # TODO PQ X30 TRAIN DATA??
     presample: False
   val:
     split: val
@@ -55,11 +55,13 @@ model:
 batch_size: 8           # -----
 val_batch_size: 1
 
-epochs: 10    
+epochs: 10
 
 feature_keys: x,heights
 
 num_classes: 3
+classes: ['floor', 'pipe', 'valve']
+cmap: [[0, 0, 0], [0, 255, 0], [0, 0, 255]]
 
 dataloader:
   num_workers: 6

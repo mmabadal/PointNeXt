@@ -41,10 +41,10 @@ def write_to_csv(oa, macc, miou, ious, best_epoch, cfg, write_header=True):
         f.close()
 
 
-def generate_data_list(cfg):
+def generate_test_list(cfg):
     raw_root = cfg.raw_root
     data_list = sorted(os.listdir(raw_root))
-    data_list = [os.path.join(raw_root, item) for item in data_list]
+    data_list = [os.path.join(raw_root, item) for item in data_list if 'test' in item]
     return data_list
 
 
@@ -102,14 +102,14 @@ def main(gpu, cfg):
         writer = None
     set_random_seed(cfg.seed + cfg.rank, deterministic=cfg.deterministic)
     torch.backends.cudnn.enabled = True
-    logging.info(cfg)
+    #logging.info(cfg)
 
     if cfg.model.get('in_channels', None) is None:
         cfg.model.in_channels = cfg.model.encoder_args.in_channels
     model = build_model_from_cfg(cfg.model).to(cfg.rank)
     model_size = cal_model_parm_nums(model)
-    logging.info(model)
-    logging.info('Number of params: %.4f M' % (model_size / 1e6))
+    #logging.info(model)
+    #logging.info('Number of params5: %.4f M' % (model_size / 1e6))
 
     if cfg.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
@@ -156,7 +156,7 @@ def main(gpu, cfg):
                 return val_miou
             elif cfg.mode == 'test':
                 best_epoch, best_val = load_checkpoint(model, pretrained_path=cfg.pretrained_path)
-                data_list = generate_data_list(cfg)
+                data_list = generate_test_list(cfg)
                 logging.info(f"length of test dataset: {len(data_list)}")
                 test_miou, test_macc, test_oa, test_ious, test_accs, _ = test(model, data_list, cfg)
 
@@ -278,7 +278,7 @@ def main(gpu, cfg):
             # TODO: 
             test_miou, test_macc, test_oa, test_ious, test_accs = validate_sphere(model, val_loader, cfg, epoch=epoch)
         else:
-            data_list = generate_data_list(cfg)
+            data_list = generate_test_list(cfg)
             test_miou, test_macc, test_oa, test_ious, test_accs, _ = test(model, data_list, cfg)
         with np.printoptions(precision=2, suppress=True):
             logging.info(
@@ -640,6 +640,7 @@ if __name__ == "__main__":
     cfg.update(opts)  # overwrite the default arguments in yml
 
     cfg.raw_root = args.data
+    cfg.dataset.common.data_root = args.data
 
     if cfg.seed is None:
         cfg.seed = np.random.randint(1, 10000)
