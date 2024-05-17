@@ -1,0 +1,70 @@
+
+---- OLD CALLS ----
+
+CUDA_VISIBLE_DEVICES=0 python examples/segmentation/main.py --cfg cfgs/s3dis/pointnext-s.yaml
+
+
+CUDA_VISIBLE_DEVICES=0 bash script/main_segmentation.sh cfgs/s3dis/pointnext-s.yaml wandb.use_wandb=False mode=test --pretrained_path log/s3dis/s3dis-train-pointnext-s-ngpus1-20240412-095302-frbazgqEBvroUaNLVjXUzB/checkpoint/s3dis-train-pointnext-s-ngpus1-20240412-095302-frbazgqEBvroUaNLVjXUzB_ckpt_best.pth visualize=True
+
+---- NEW CALLS ----
+
+CUDA_VISIBLE_DEVICES=0 python examples/segmentation/train.py --cfg cfgs/pipes/pointnext-s-pipes.yaml --data data/pipes/pool/split_1/
+
+
+CUDA_VISIBLE_DEVICES=0 python examples/segmentation/inference.py --cfg  cfgs/pipes/pointnext-s-pipes.yaml wandb.use_wandb=False mode=test --pretrained_path log/pipes/pipes-train-pointnext-s-pipes-ngpus1-20240502-110919-RAGAHQqVB3sFTysij4m4u3/checkpoint/pipes-train-pointnext-s-pipes-ngpus1-20240502-110919-RAGAHQqVB3sFTysij4m4u3_ckpt_best.pth visualize=True --data data/pipes/test_3/
+
+
+
+---- THINGS DONE -----
+
+ - download + install pointnext
+ - download s3dis data
+ - train with s3dis data - (train/val to train and then inference over subsampled test) 
+ - inference over test
+
+
+ - adapt net
+ - adapt data
+  
+ - s - l - xl
+ 
+ - loop - epoch
+ 
+ - early stopping
+ 
+ - weights
+
+  
+---- ADAPT NEW DATASET ----
+  
+ * cfgs/xxxx/xxxxx.yaml
+  	- NAME: PIPES
+  	- batch_size: 8
+  	- val_batch_size: 1
+  	- epochs: 100
+  	- early: 2
+  	- num_classes: 3
+	- classes: ['floor', 'pipe', 'valve']
+	- cmap: [[0, 0, 0], [0, 255, 0], [0, 0, 255]]
+	- log_dir: 'pipes'
+  
+ * PointNext/openpoints/dataset/__init__.py
+  	- from .pipes import PIPES
+  	
+ * PointNext/openpoints/dataset/xxx/__init__.py
+  	- from .pipes import PIPES
+  	
+ * PointNext/openpoints/dataset/xxx/xxx.py
+	- class PIPES(Dataset):
+	- classes = ['floor',
+	             'pipe',
+	             'valve']
+
+	- num_classes = 3
+	- num_per_class = np.array([242967508, 19798250, 4955829], dtype=np.int32)  # TODO weights
+	- class2color = {'floor':      [0, 0, 0],
+		   	  'pipe':	[0, 255, 0],
+		   	  'valve':	[0, 0, 255]}
+	- data_root: str = 'data/pipes/pool',
+
+
