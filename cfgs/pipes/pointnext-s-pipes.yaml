@@ -7,7 +7,7 @@ dataset:
   train:
     split: train
     voxel_max: 24000
-    loop: 30  # here, the training has been looped 30 times. therefore, the training epochs do not need much. # TODO PQ X30 TRAIN DATA??
+    loop: 1  # here, the training has been looped 30 times. therefore, the training epochs do not need much. # TODO PQ X30 TRAIN DATA??
     presample: False
   val:
     split: val
@@ -55,7 +55,8 @@ model:
 batch_size: 8           # -----
 val_batch_size: 1
 
-epochs: 10
+epochs: 100
+early: 2
 
 feature_keys: x,heights
 

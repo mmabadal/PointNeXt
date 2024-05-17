@@ -148,7 +148,7 @@ def main(gpu, cfg):
         else:
             if cfg.mode == 'val':
                 best_epoch, best_val = load_checkpoint(model, pretrained_path=cfg.pretrained_path)
-                val_miou, val_macc, val_oa, val_ious, val_accs = validate_fn(model, val_loader, cfg, num_votes=1, epoch=epoch)
+                val_loss, val_miou, val_macc, val_oa, val_ious, val_accs = validate_fn(model, val_loader, cfg, num_votes=1, epoch=epoch)
                 with np.printoptions(precision=2, suppress=True):
                     logging.info(
                         f'Best ckpt @E{best_epoch},  val_oa , val_macc, val_miou: {val_oa:.2f} {val_macc:.2f} {val_miou:.2f}, '
@@ -213,6 +213,8 @@ def main(gpu, cfg):
     val_miou, val_macc, val_oa, val_ious, val_accs = 0., 0., 0., [], []
     best_val, macc_when_best, oa_when_best, ious_when_best, best_epoch = 0., 0., 0., [], 0
     total_iter = 0
+    train_loss_list = []
+    val_loss_list = []
     for epoch in range(cfg.start_epoch, cfg.epochs + 1):
         if cfg.distributed:
             train_loader.sampler.set_epoch(epoch)
@@ -220,10 +222,11 @@ def main(gpu, cfg):
             train_loader.dataset.epoch = epoch - 1
         train_loss, train_miou, train_macc, train_oa, _, _, total_iter = \
             train_one_epoch(model, train_loader, criterion, optimizer, scheduler, scaler, epoch, total_iter, cfg)
-
+        train_loss_list.append(train_loss)
         is_best = False
         if epoch % cfg.val_freq == 0:
-            val_miou, val_macc, val_oa, val_ious, val_accs = validate_fn(model, val_loader, cfg, epoch=epoch, total_iter=total_iter)
+            val_loss, val_miou, val_macc, val_oa, val_ious, val_accs = validate_fn(model, val_loader, criterion, cfg, epoch=epoch, total_iter=total_iter)
+            val_loss_list.append(val_loss)
             if val_miou > best_val:
                 is_best = True
                 best_val = val_miou
@@ -239,11 +242,17 @@ def main(gpu, cfg):
         lr = optimizer.param_groups[0]['lr']
         logging.info(f'Epoch {epoch} LR {lr:.6f} '
                      f'train_miou {train_miou:.2f}, val_miou {val_miou:.2f}, best val miou {best_val:.2f}')
+        
+        print("train loss: " + str(train_loss))
+        print("val loss: " + str(val_loss))
+        
+        
         if writer is not None:
             writer.add_scalar('best_val', best_val, epoch)
             writer.add_scalar('val_miou', val_miou, epoch)
             writer.add_scalar('macc_when_best', macc_when_best, epoch)
             writer.add_scalar('oa_when_best', oa_when_best, epoch)
+            writer.add_scalar('val_loss', val_loss, epoch)
             writer.add_scalar('val_macc', val_macc, epoch)
             writer.add_scalar('val_oa', val_oa, epoch)
             writer.add_scalar('train_loss', train_loss, epoch)
@@ -259,6 +268,11 @@ def main(gpu, cfg):
                             is_best=is_best
                             )
             is_best = False
+
+        stop = early_stopping(train_loss_list, val_loss_list, cfg.early)
+        if stop == True:
+            break
+
     # do not save file to wandb to save wandb space
     # if writer is not None:
     #     Wandb.add_file(os.path.join(cfg.ckpt_dir, f'{cfg.run_name}_ckpt_best.pth'))
@@ -293,7 +307,7 @@ def main(gpu, cfg):
         if cfg.use_voting:
             load_checkpoint(model, pretrained_path=os.path.join(cfg.ckpt_dir, f'{cfg.run_name}_ckpt_best.pth'))
             set_random_seed(cfg.seed)
-            val_miou, val_macc, val_oa, val_ious, val_accs = validate_fn(model, val_loader, cfg, num_votes=20,
+            val_loss, val_miou, val_macc, val_oa, val_ious, val_accs = validate_fn(model, val_loader, cfg, num_votes=20,
                                                                          data_transform=data_transform, epoch=epoch)
             if writer is not None:
                 writer.add_scalar('val_miou20', val_miou, cfg.epochs + 50)
@@ -312,8 +326,21 @@ def main(gpu, cfg):
     wandb.finish(exit_code=True)
 
 
+def early_stopping(train_loss_list, val_loss_list, thr):
+    stop = False
+    if len(train_loss_list)>9:
+        a = 100*((val_loss_list[-1]/min(val_loss_list))-1)
+        b = 1000*((sum(train_loss_list[-10:])/(10*min(train_loss_list[-10:])))-1)
+        ab = a/b
+        if ab > thr:
+            stop=True
+    
+        print("early stopping: " + str(ab) + " --> " + str(stop))
+    return stop
+
+
 def train_one_epoch(model, train_loader, criterion, optimizer, scheduler, scaler, epoch, total_iter, cfg):
-    loss_meter = AverageMeter()
+    loss_meter_train = AverageMeter()
     cm = ConfusionMatrix(num_classes=cfg.num_classes, ignore_index=cfg.ignore_index)
     model.train()  # set model to training mode
     pbar = tqdm(enumerate(train_loader), total=train_loader.__len__())
@@ -362,17 +389,18 @@ def train_one_epoch(model, train_loader, criterion, optimizer, scheduler, scaler
             
         # update confusion matrix
         cm.update(logits.argmax(dim=1), target)
-        loss_meter.update(loss.item())
+        loss_meter_train.update(loss.item())
 
         if idx % cfg.print_freq:
             pbar.set_description(f"Train Epoch [{epoch}/{cfg.epochs}] "
-                                 f"Loss {loss_meter.val:.3f} Acc {cm.overall_accuray:.2f}")
+                                 f"Loss {loss_meter_train.val:.3f} Acc {cm.overall_accuray:.2f}")
     miou, macc, oa, ious, accs = cm.all_metrics()
-    return loss_meter.avg, miou, macc, oa, ious, accs, total_iter
+    return loss_meter_train.avg, miou, macc, oa, ious, accs, total_iter
 
 
 @torch.no_grad()
-def validate(model, val_loader, cfg, num_votes=1, data_transform=None, epoch=-1, total_iter=-1):
+def validate(model, val_loader, criterion, cfg, num_votes=1, data_transform=None, epoch=-1, total_iter=-1):
+    loss_meter_val = AverageMeter()
     model.eval()  # set model to eval mode
     cm = ConfusionMatrix(num_classes=cfg.num_classes, ignore_index=cfg.ignore_index)
     pbar = tqdm(enumerate(val_loader), total=val_loader.__len__(), desc='Val')
@@ -385,11 +413,18 @@ def validate(model, val_loader, cfg, num_votes=1, data_transform=None, epoch=-1,
         data['epoch'] = epoch
         data['iter'] = total_iter 
         logits = model(data)
+
+        with torch.cuda.amp.autocast(enabled=cfg.use_amp):
+            loss = criterion(logits, target) if 'mask' not in cfg.criterion_args.NAME.lower() \
+                else criterion(logits, target, data['mask'])
+
         if 'mask' not in cfg.criterion_args.NAME or cfg.get('use_maks', False):
             cm.update(logits.argmax(dim=1), target)
         else:
             mask = data['mask'].bool()
             cm.update(logits.argmax(dim=1)[mask], target[mask])
+
+        loss_meter_val.update(loss.item())
 
         """visualization in debug mode
         from openpoints.dataset.vis3d import vis_points, vis_multi_points
@@ -414,8 +449,7 @@ def validate(model, val_loader, cfg, num_votes=1, data_transform=None, epoch=-1,
     if cfg.distributed:
         dist.all_reduce(tp), dist.all_reduce(union), dist.all_reduce(count)
     miou, macc, oa, ious, accs = get_mious(tp, union, count)
-    return miou, macc, oa, ious, accs
-
+    return loss_meter_val.avg, miou, macc, oa, ious, accs
 
 @torch.no_grad()
 def validate_sphere(model, val_loader, cfg, num_votes=1, data_transform=None, epoch=-1, total_iter=-1):
@@ -490,7 +524,9 @@ def validate_sphere(model, val_loader, cfg, num_votes=1, data_transform=None, ep
             # output pred labels
             write_obj(coord[start_idx:end_idx], pred[start_idx:end_idx],
                         os.path.join(cfg.vis_dir, f'{cfg.cfg_basename}-{dataset_name}-{idx}.obj'))
-    return miou, macc, oa, ious, accs
+
+            holder = 0 # holder cause validate() returns loss_val
+    return holder, miou, macc, oa, ious, accs
 
 
 # TODO: multi gpu support. Warp to a dataloader.
