@@ -42,14 +42,13 @@ def write_to_csv(oa, macc, miou, ious, best_epoch, cfg, write_header=True):
 
 
 def generate_test_list(cfg):
-    raw_root = cfg.raw_root
-    data_list = sorted(os.listdir(raw_root))
-    data_list = [os.path.join(raw_root, item) for item in data_list if 'test' in item]
-    return data_list
+    test_list = sorted(os.listdir(cfg.path_test))
+    test_list = [os.path.join(cfg.path_test, item) for item in test_list]
+    return test_list
 
 
-def load_data(data_path, cfg):
-    data = np.load(data_path)  # xyzrgbl, N*7
+def load_data(file_path, cfg):
+    data = np.load(file_path)  # xyzrgbl, N*7
     coord, feat, label = data[:, :3], data[:, 3:6], data[:, 6]
     feat = np.clip(feat / 255., 0, 1).astype(np.float32)
 
@@ -124,7 +123,8 @@ def main(gpu, cfg):
     scheduler = build_scheduler_from_cfg(cfg, optimizer)
 
     # build dataset
-    val_loader = build_dataloader_from_cfg(cfg.get('val_batch_size', cfg.batch_size),
+    val_loader = build_dataloader_from_cfg(cfg,
+                                           cfg.get('val_batch_size', cfg.batch_size),
                                            cfg.dataset,
                                            cfg.dataloader,
                                            datatransforms_cfg=cfg.datatransforms,
@@ -154,21 +154,6 @@ def main(gpu, cfg):
                         f'Best ckpt @E{best_epoch},  val_oa , val_macc, val_miou: {val_oa:.2f} {val_macc:.2f} {val_miou:.2f}, '
                         f'\niou per cls is: {val_ious}')
                 return val_miou
-            elif cfg.mode == 'test':
-                best_epoch, best_val = load_checkpoint(model, pretrained_path=cfg.pretrained_path)
-                data_list = generate_test_list(cfg)
-                logging.info(f"length of test dataset: {len(data_list)}")
-                test_miou, test_macc, test_oa, test_ious, test_accs, _ = test(model, data_list, cfg)
-
-                if test_miou is not None:
-                    with np.printoptions(precision=2, suppress=True):
-                        logging.info(
-                            f'Best ckpt @E{best_epoch},  test_oa , test_macc, test_miou: {test_oa:.2f} {test_macc:.2f} {test_miou:.2f}, '
-                            f'\niou per cls is: {test_ious}')
-                    cfg.csv_path = os.path.join(cfg.run_dir, cfg.run_name + '_test.csv')
-                    write_to_csv(test_oa, test_macc, test_miou, test_ious, best_epoch, cfg)
-                return test_miou
-
             elif 'encoder' in cfg.mode:
                 if 'inv' in cfg.mode:
                     logging.info(f'Finetuning from {cfg.pretrained_path}')
@@ -187,7 +172,8 @@ def main(gpu, cfg):
         for p in model_module.encoder.blocks.parameters():
             p.requires_grad = False
 
-    train_loader = build_dataloader_from_cfg(cfg.batch_size,
+    train_loader = build_dataloader_from_cfg(cfg,
+                                             cfg.batch_size,
                                              cfg.dataset,
                                              cfg.dataloader,
                                              datatransforms_cfg=cfg.datatransforms,
@@ -292,8 +278,8 @@ def main(gpu, cfg):
             # TODO: 
             test_miou, test_macc, test_oa, test_ious, test_accs = validate_sphere(model, val_loader, cfg, epoch=epoch)
         else:
-            data_list = generate_test_list(cfg)
-            test_miou, test_macc, test_oa, test_ious, test_accs, _ = test(model, data_list, cfg)
+            test_list = generate_test_list(cfg)
+            test_miou, test_macc, test_oa, test_ious, test_accs, _ = test(model, test_list, cfg)
         with np.printoptions(precision=2, suppress=True):
             logging.info(
                 f'Best ckpt @E{best_epoch},  test_oa {test_oa:.2f}, test_macc {test_macc:.2f}, test_miou {test_miou:.2f}, '
@@ -531,7 +517,7 @@ def validate_sphere(model, val_loader, cfg, num_votes=1, data_transform=None, ep
 
 # TODO: multi gpu support. Warp to a dataloader.
 @torch.no_grad()
-def test(model, data_list, cfg, num_votes=1):
+def test(model, test_list, cfg, num_votes=1):
     """using a part of original point cloud as input to save memory.
     Args:
         model (_type_): _description_
@@ -556,18 +542,18 @@ def test(model, data_list, cfg, num_votes=1):
     pipe_transform = build_transforms_from_cfg(trans_split, cfg.datatransforms)
 
     dataset_name = cfg.dataset.common.NAME.lower()
-    len_data = len(data_list)
+    len_data = len(test_list)
 
     cfg.save_path = cfg.get('save_path', f'results/{cfg.task_name}/{cfg.dataset.test.split}/{cfg.cfg_basename}')
     os.makedirs(cfg.save_path, exist_ok=True)
 
     gravity_dim = cfg.datatransforms.kwargs.gravity_dim
     nearest_neighbor = cfg.get('test_mode', 'multi_voxel') == 'nearest_neighbor'
-    for cloud_idx, data_path in enumerate(data_list):
+    for cloud_idx, file_path in enumerate(test_list):
         logging.info(f'Test [{cloud_idx}]/[{len_data}] cloud')
         cm = ConfusionMatrix(num_classes=cfg.num_classes, ignore_index=cfg.ignore_index)
         all_logits = []
-        coord, feat, label, idx_points, voxel_idx, reverse_idx_part, reverse_idx  = load_data(data_path, cfg)
+        coord, feat, label, idx_points, voxel_idx, reverse_idx_part, reverse_idx  = load_data(file_path, cfg)
         if label is not None:
             label = torch.from_numpy(label.astype(np.int).squeeze()).cuda(non_blocking=True)
 
@@ -667,16 +653,20 @@ def test(model, data_list, cfg, num_votes=1):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser('Scene segmentation training/testing')
     parser.add_argument('--cfg', type=str, required=True, help='config file')
-    parser.add_argument('--data', type=str, required=True, help='config file')
+    parser.add_argument('--path_trainval', type=str, required=True, help='config file')
+    parser.add_argument('--path_test', type=str, required=True, help='config file')
+    parser.add_argument('--run_name', type=str, required=True, help='config file')
     parser.add_argument('--profile', action='store_true', default=False, help='set to True to profile speed')
     args, opts = parser.parse_known_args()
 
     cfg = EasyConfig()
     cfg.load(args.cfg, recursive=True)
     cfg.update(opts)  # overwrite the default arguments in yml
+    
+    cfg.run_name = args.run_name
 
-    cfg.raw_root = args.data
-    cfg.dataset.common.data_root = args.data
+    cfg.path_test = args.path_test
+    cfg.dataset.common.data_root = args.path_trainval
 
     if cfg.seed is None:
         cfg.seed = np.random.randint(1, 10000)
@@ -710,9 +700,17 @@ if __name__ == "__main__":
         cfg.wandb.tags = tags
     os.environ["JOB_LOG_DIR"] = cfg.log_dir
     cfg_path = os.path.join(cfg.run_dir, "cfg.yaml")
-    with open(cfg_path, 'w') as f:
-        yaml.dump(cfg, f, indent=2)
-        os.system('cp %s %s' % (args.cfg, cfg.run_dir))
+
+    cfg_parent_path = os.path.join(cfg.run_dir,'cfg')
+    cfg_child_path = os.path.join(cfg.run_dir,'cfg','child')
+
+    if not os.path.exists(cfg_parent_path):
+        os.mkdir(cfg_parent_path)
+        os.mkdir(cfg_child_path)
+    
+    os.system('cp %s %s' % (os.path.join(os.path.split(args.cfg)[0], '../default.yaml'), cfg_parent_path))
+    os.system('cp %s %s' % (args.cfg, cfg_child_path))
+
     cfg.cfg_path = cfg_path
 
     # wandb config

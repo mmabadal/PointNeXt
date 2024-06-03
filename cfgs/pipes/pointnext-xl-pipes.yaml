@@ -2,7 +2,7 @@
 dataset:
   common:
     NAME: PIPES
-    voxel_size: 0.01
+    voxel_size: 0.04
   train:
     split: train
     voxel_max: 24000
@@ -21,11 +21,11 @@ model:
   NAME: BaseSeg
   encoder_args:
     NAME: PointNextEncoder
-    blocks: [1, 1, 1, 1, 1]
+    blocks: [1, 4, 7, 4, 4]
     strides: [1, 4, 4, 4, 4]
-    sa_layers: 2 
-    sa_use_res: True 
-    width: 32
+    sa_layers: 1 
+    sa_use_res: False 
+    width: 64
     in_channels: 4
     expansion: 4
     radius: 0.1
@@ -51,11 +51,11 @@ model:
     norm_args:
       norm: 'bn'
 
-batch_size: 8           # -----
+batch_size: 1           # -----
 val_batch_size: 1
 
 epochs: 100
-early: 2
+early: 9999
 
 feature_keys: x,heights
 

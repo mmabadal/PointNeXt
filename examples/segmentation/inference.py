@@ -4,6 +4,7 @@ This file currently supports training and testing on S3DIS
 If more than 1 GPU is provided, will launch multi processing distributed training by default
 if you only wana use 1 GPU, set `CUDA_VISIBLE_DEVICES` accordingly
 """
+import glob
 import __init__
 import argparse, yaml, os, logging, numpy as np, csv, wandb, glob
 from tqdm import tqdm
@@ -42,14 +43,13 @@ def write_to_csv(oa, macc, miou, ious, best_epoch, cfg, write_header=True):
 
 
 def generate_test_list(cfg):
-    raw_root = cfg.raw_root
-    data_list = sorted(os.listdir(raw_root))
-    data_list = [os.path.join(raw_root, item) for item in data_list if 'test' in item]
-    return data_list
+    test_list = sorted(os.listdir(cfg.path_test))
+    test_list = [os.path.join(cfg.path_test, item) for item in test_list]
+    return test_list
 
 
-def load_data(data_path, cfg):
-    data = np.load(data_path)  # xyzrgbl, N*7
+def load_data(file_path, cfg):
+    data = np.load(file_path)  # xyzrgbl, N*7
     coord, feat, label = data[:, :3], data[:, 3:6], data[:, 6]
     feat = np.clip(feat / 255., 0, 1).astype(np.float32)
 
@@ -169,11 +169,11 @@ def test(model, data_list, cfg, num_votes=1):
 
     gravity_dim = cfg.datatransforms.kwargs.gravity_dim
     nearest_neighbor = cfg.get('test_mode', 'multi_voxel') == 'nearest_neighbor'
-    for cloud_idx, data_path in enumerate(data_list):
+    for cloud_idx, file_path in enumerate(data_list):
         logging.info(f'Test [{cloud_idx}]/[{len_data}] cloud')
         cm = ConfusionMatrix(num_classes=cfg.num_classes, ignore_index=cfg.ignore_index)
         all_logits = []
-        coord, feat, label, idx_points, voxel_idx, reverse_idx_part, reverse_idx  = load_data(data_path, cfg)
+        coord, feat, label, idx_points, voxel_idx, reverse_idx_part, reverse_idx  = load_data(file_path, cfg)
         if label is not None:
             label = torch.from_numpy(label.astype(np.int).squeeze()).cuda(non_blocking=True)
 
@@ -274,18 +274,30 @@ def test(model, data_list, cfg, num_votes=1):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser('Scene segmentation training/testing')
-    parser.add_argument('--cfg', type=str, required=True, help='config file')
-    parser.add_argument('--data', type=str, required=True, help='config file')
+    parser.add_argument('--path_model', type=str, required=True, help='config file')
+    parser.add_argument('--path_test', type=str, required=True, help='config file')
     parser.add_argument('--profile', action='store_true', default=False, help='set to True to profile speed')
     args, opts = parser.parse_known_args()
 
+    for file in os.listdir(os.path.join(args.path_model, 'checkpoint')):
+        if "best" in file:
+            break
+    pretrained_path = os.path.join(args.path_model, 'checkpoint', file)
+
+
+    cfg_file = os.listdir(os.path.join(args.path_model,'cfg/child'))
+
+    path_cfg = os.path.join(args.path_model, 'cfg/child', cfg_file[0])
+
     cfg = EasyConfig()
-    cfg.load(args.cfg, recursive=True)
+    cfg.load(path_cfg, recursive=True)
     cfg.update(opts)  # overwrite the default arguments in yml
 
-    cfg.raw_root = args.data
-    cfg.dataset.common.data_root = args.data
-
+    cfg.visualize = True
+    cfg.wandb.use_wandb = False
+    cfg.path_test = args.path_test
+    cfg.pretrained_path = pretrained_path
+    cfg.mode =  "test"
     if cfg.seed is None:
         cfg.seed = np.random.randint(1, 10000)
 
@@ -294,8 +306,9 @@ if __name__ == "__main__":
     cfg.sync_bn = cfg.world_size > 1
 
     # init log dir
-    cfg.task_name = args.cfg.split('.')[-2].split('/')[-2]  # task/dataset name, \eg s3dis, modelnet40_cls
-    cfg.cfg_basename = args.cfg.split('.')[-2].split('/')[-1]  # cfg_basename, \eg pointnext-xl
+    #cfg.task_name = args.cfg.split('.')[-2].split('/')[-2]  # task/dataset name, \eg s3dis, modelnet40_cls
+    cfg.task_name = cfg.log_dir
+    cfg.cfg_basename = path_cfg.split('.')[-2].split('/')[-1]  # cfg_basename, \eg pointnext-xl
     tags = [
         cfg.task_name,  # task name (the folder of name under ./cfgs
         cfg.mode,
@@ -317,11 +330,7 @@ if __name__ == "__main__":
         generate_exp_directory(cfg, tags, additional_id=os.environ.get('MASTER_PORT', None))
         cfg.wandb.tags = tags
     os.environ["JOB_LOG_DIR"] = cfg.log_dir
-    cfg_path = os.path.join(cfg.run_dir, "cfg.yaml")
-    with open(cfg_path, 'w') as f:
-        yaml.dump(cfg, f, indent=2)
-        os.system('cp %s %s' % (args.cfg, cfg.run_dir))
-    cfg.cfg_path = cfg_path
+    cfg.cfg_path = path_cfg
 
     # wandb config
     cfg.wandb.name = cfg.run_name
