@@ -55,8 +55,8 @@ def load_data(file_path, cfg):
         sub_data = data[sub_idx]
     else:
         sub_data = data
-    coord, feat, label = sub_data[:, :3], sub_data[:, 3:6], sub_data[:, 6]
-
+    coord, feat = sub_data[:, :3], sub_data[:, 3:6]
+    
     feat = np.clip(feat / 255., 0, 1).astype(np.float32)
 
     idx_points = []
@@ -83,9 +83,9 @@ def load_data(file_path, cfg):
                 np.random.shuffle(idx_part)
                 idx_points.append(idx_part)
     else:
-        idx_points.append(np.arange(label.shape[0]))
+        idx_points.append(np.arange(coord.shape[0]))
 
-    return coord, feat, label, idx_points, voxel_idx, reverse_idx_part, reverse_idx_sort
+    return coord, feat, idx_points, voxel_idx, reverse_idx_part, reverse_idx_sort
 
 
 def main(gpu, cfg):
@@ -127,163 +127,121 @@ def main(gpu, cfg):
     # optionally resume from a checkpoint
     model_module = model.module if hasattr(model, 'module') else model
     best_epoch, best_val = load_checkpoint(model, pretrained_path=cfg.pretrained_path)
-    data_list = generate_test_list(cfg)
-    logging.info(f"length of test dataset: {len(data_list)}")
-    test_miou, test_macc, test_oa, test_ious, test_accs, _ = test(model, data_list, cfg)
-
-    if test_miou is not None:
-        with np.printoptions(precision=2, suppress=True):
-            logging.info(
-                f'Best ckpt @E{best_epoch},  test_oa , test_macc, test_miou: {test_oa:.2f} {test_macc:.2f} {test_miou:.2f}, '
-                f'\niou per cls is: {test_ious}')
-        cfg.csv_path = os.path.join(cfg.run_dir, cfg.run_name + '_test.csv')
-        write_to_csv(test_oa, test_macc, test_miou, test_ious, best_epoch, cfg)
-    return test_miou
+#     test_miou, test_macc, test_oa, test_ious, test_accs, _ = test(model, data_list, cfg)
 
 
-@torch.no_grad()
-def test(model, data_list, cfg, num_votes=1):
-    """using a part of original point cloud as input to save memory.
-    Args:
-        model (_type_): _description_
-        test_loader (_type_): _description_
-        cfg (_type_): _description_
-        num_votes (int, optional): _description_. Defaults to 1.
-    Returns:
-        _type_: _description_
-    """
+# @torch.no_grad()
+# def test(model, data_list, cfg, num_votes=1):
+#     """using a part of original point cloud as input to save memory.
+#     Args:
+#         model (_type_): _description_
+#         test_loader (_type_): _description_
+#         cfg (_type_): _description_
+#         num_votes (int, optional): _description_. Defaults to 1.
+#     Returns:
+#         _type_: _description_
+#     """
+
+
     model.eval()  # set model to eval mode
     all_cm = ConfusionMatrix(num_classes=cfg.num_classes, ignore_index=cfg.ignore_index)
     set_random_seed(0)
     cfg.visualize = cfg.get('visualize', False)
     if cfg.visualize:
         from openpoints.dataset.vis3d import write_obj
-        cfg.vis_dir = os.path.join(cfg.run_dir, 'visualization')
-        os.makedirs(cfg.vis_dir, exist_ok=True)
         cfg.cmap = cfg.cmap.astype(np.float32) / 255.
 
-    # data
     trans_split = 'val' if cfg.datatransforms.get('test', None) is None else 'test'
     pipe_transform = build_transforms_from_cfg(trans_split, cfg.datatransforms)
 
     dataset_name = cfg.dataset.common.NAME.lower()
-    len_data = len(data_list)
 
     cfg.save_path = cfg.get('save_path', f'results/{cfg.task_name}/{cfg.dataset.test.split}/{cfg.cfg_basename}')
     os.makedirs(cfg.save_path, exist_ok=True)
 
     gravity_dim = cfg.datatransforms.kwargs.gravity_dim
     nearest_neighbor = cfg.get('test_mode', 'multi_voxel') == 'nearest_neighbor'
-    for cloud_idx, file_path in enumerate(data_list):
-        logging.info(f'Test [{cloud_idx}]/[{len_data}] cloud')
-        cm = ConfusionMatrix(num_classes=cfg.num_classes, ignore_index=cfg.ignore_index)
-        all_logits = []
-        coord, feat, label, idx_points, voxel_idx, reverse_idx_part, reverse_idx  = load_data(file_path, cfg)
-        name = os.path.basename(file_path)
 
-        if label is not None:
-            label = torch.from_numpy(label.astype(np.int).squeeze()).cuda(non_blocking=True)
+    # while 1
+        # get folder list
+        # for each file in list
+            # infer file and delete
+    while 1:
 
-        len_part = len(idx_points)
-        nearest_neighbor = len_part == 1
-        pbar = tqdm(range(len(idx_points)))
-        for idx_subcloud in pbar:
-            pbar.set_description(f"Test on {name}")
-            if not (nearest_neighbor and idx_subcloud>0):
-                idx_part = idx_points[idx_subcloud]
-                coord_part = coord[idx_part]
-                coord_part -= coord_part.min(0)
+        data_list = generate_test_list(cfg)
 
-                feat_part =  feat[idx_part] if feat is not None else None
-                data = {'pos': coord_part}
-                if feat_part is not None:
-                    data['x'] = feat_part
-                if pipe_transform is not None:
-                    data = pipe_transform(data)
-                if 'heights' in cfg.feature_keys and 'heights' not in data.keys():
-                    data['heights'] = torch.from_numpy(coord_part[:, gravity_dim:gravity_dim + 1].astype(np.float32)).unsqueeze(0)
-                if not cfg.dataset.common.get('variable', False):
-                    if 'x' in data.keys():
-                        data['x'] = data['x'].unsqueeze(0)
-                    data['pos'] = data['pos'].unsqueeze(0)
-                else:
-                    data['o'] = torch.IntTensor([len(coord)])
-                    data['batch'] = torch.LongTensor([0] * len(coord))
+        for file_path in data_list:
 
-                for key in data.keys():
-                    data[key] = data[key].cuda(non_blocking=True)
-                data['x'] = get_features_by_keys(data, cfg.feature_keys)
-                logits = model(data)
+            cm = ConfusionMatrix(num_classes=cfg.num_classes, ignore_index=cfg.ignore_index)
+            all_logits = []
+            coord, feat, idx_points, voxel_idx, reverse_idx_part, reverse_idx  = load_data(file_path, cfg)
 
-                # """visualization in debug mode. !!! visulization is not correct, should remove ignored idx."""
-                # from openpoints.dataset.vis3d import vis_points, vis_multi_points
-                # vis_multi_points([coord, coord_part], labels=[label.cpu().numpy(), logits.argmax(dim=1).squeeze().cpu().numpy()])
-                
+            name = os.path.basename(file_path)
+            os.remove(file_path)
 
-            all_logits.append(logits)
-        all_logits = torch.cat(all_logits, dim=0)
-        if not cfg.dataset.common.get('variable', False):
-            all_logits = all_logits.transpose(1, 2).reshape(-1, cfg.num_classes)
+            len_part = len(idx_points)
+            nearest_neighbor = len_part == 1
+            pbar = tqdm(range(len(idx_points)))
+            for idx_subcloud in pbar:
+                pbar.set_description(f"Inference on {name}")
+                if not (nearest_neighbor and idx_subcloud>0):
+                    idx_part = idx_points[idx_subcloud]
+                    coord_part = coord[idx_part]
+                    coord_part -= coord_part.min(0)
 
-        if not nearest_neighbor:
-            # average merge overlapped multi voxels logits to original point set
-            idx_points = torch.from_numpy(np.hstack(idx_points)).cuda(non_blocking=True)
-            all_logits = scatter(all_logits, idx_points, dim=0, reduce='mean')
-        else:
-            # interpolate logits by nearest neighbor
-            all_logits = all_logits[reverse_idx_part][voxel_idx][reverse_idx]
-        pred = all_logits.argmax(dim=1)
-        if label is not None:
-            cm.update(pred, label)
+                    feat_part =  feat[idx_part] if feat is not None else None
+                    data = {'pos': coord_part}
+                    if feat_part is not None:
+                        data['x'] = feat_part
+                    if pipe_transform is not None:
+                        data = pipe_transform(data)
+                    if 'heights' in cfg.feature_keys and 'heights' not in data.keys():
+                        data['heights'] = torch.from_numpy(coord_part[:, gravity_dim:gravity_dim + 1].astype(np.float32)).unsqueeze(0)
+                    if not cfg.dataset.common.get('variable', False):
+                        if 'x' in data.keys():
+                            data['x'] = data['x'].unsqueeze(0)
+                        data['pos'] = data['pos'].unsqueeze(0)
+                    else:
+                        data['o'] = torch.IntTensor([len(coord)])
+                        data['batch'] = torch.LongTensor([0] * len(coord))
 
-        # """visualization in debug mode"""
-        # from openpoints.dataset.vis3d import vis_points, vis_multi_points
-        # vis_multi_points([coord, coord], labels=[label.cpu().numpy(), all_logits.argmax(dim=1).squeeze().cpu().numpy()])
-        
-        if cfg.visualize:
-            gt = label.cpu().numpy().squeeze() if label is not None else None
+                    for key in data.keys():
+                        data[key] = data[key].cuda(non_blocking=True)
+                    data['x'] = get_features_by_keys(data, cfg.feature_keys)
+                    logits = model(data)
+                    
+                all_logits.append(logits)
+            all_logits = torch.cat(all_logits, dim=0)
+            if not cfg.dataset.common.get('variable', False):
+                all_logits = all_logits.transpose(1, 2).reshape(-1, cfg.num_classes)
+
+            if not nearest_neighbor:
+                # average merge overlapped multi voxels logits to original point set
+                idx_points = torch.from_numpy(np.hstack(idx_points)).cuda(non_blocking=True)
+                all_logits = scatter(all_logits, idx_points, dim=0, reduce='mean')
+            else:
+                # interpolate logits by nearest neighbor
+                all_logits = all_logits[reverse_idx_part][voxel_idx][reverse_idx]
+            pred = all_logits.argmax(dim=1)
+
             pred = pred.cpu().numpy().squeeze()
-            gt = cfg.cmap[gt, :] if gt is not None else None
             pred = cfg.cmap[pred, :]
+
             # output pred labels
-
-            write_obj(coord, feat,
-                      os.path.join(cfg.vis_dir, f'input-{name}.obj'))
-            # output ground truth labels
-            if gt is not None:
-                write_obj(coord, gt,
-                        os.path.join(cfg.vis_dir, f'gt-{name}.obj'))
+            write_obj(coord, feat, os.path.join(cfg.path_out, f'input-{name}.obj'))
             # output pred labels
-            write_obj(coord, pred,
-                      os.path.join(cfg.vis_dir, f'{cfg.cfg_basename}-{name}.obj'))
-
-
-        if label is not None:
-            tp, union, count = cm.tp, cm.union, cm.count
-            miou, macc, oa, ious, accs = get_mious(tp, union, count)
-            with np.printoptions(precision=2, suppress=True):
-                logging.info(
-                    f'[{cloud_idx}]/[{len_data}] cloud,  test_oa , test_macc, test_miou: {oa:.2f} {macc:.2f} {miou:.2f}, '
-                    f'\niou per cls is: {ious}')
-            all_cm.value += cm.value
-
-
-    if label is not None:
-        tp, union, count = all_cm.tp, all_cm.union, all_cm.count
-        if cfg.distributed:
-            dist.all_reduce(tp), dist.all_reduce(union), dist.all_reduce(count)
-        miou, macc, oa, ious, accs = get_mious(tp, union, count)
-        return miou, macc, oa, ious, accs, all_cm
-    else:
-        return None, None, None, None, None, None
+            write_obj(coord, pred, os.path.join(cfg.path_out, f'{cfg.cfg_basename}-{name}.obj'))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser('Scene segmentation training/testing')
     parser.add_argument('--path_model', type=str, required=True, help='config file')
     parser.add_argument('--path_test', type=str, required=True, help='config file')
+    parser.add_argument('--path_out', type=str, required=True, help='config file')
     parser.add_argument('--profile', action='store_true', default=False, help='set to True to profile speed')
     args, opts = parser.parse_known_args()
+
+
 
     for file in os.listdir(os.path.join(args.path_model, 'checkpoint')):
         if "best" in file:
@@ -304,6 +262,11 @@ if __name__ == "__main__":
     cfg.path_test = args.path_test
     cfg.pretrained_path = pretrained_path
     cfg.mode =  "test"
+
+    cfg.path_out = args.path_out
+    os.makedirs(cfg.path_out, exist_ok=True)
+
+
     if cfg.seed is None:
         cfg.seed = np.random.randint(1, 10000)
 

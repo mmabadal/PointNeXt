@@ -49,7 +49,12 @@ def generate_test_list(cfg):
 
 def load_data(file_path, cfg):
     data = np.load(file_path)  # xyzrgbl, N*7
-    coord, feat, label = data[:, :3], data[:, 3:6], data[:, 6]
+    if cfg.points != 0:
+        sub_idx = np.linspace(0, data.shape[0]-1, cfg.points, dtype=int)
+        sub_data = data[sub_idx]
+    else:
+        sub_data = data
+    coord, feat, label = sub_data[:, :3], sub_data[:, 3:6], sub_data[:, 6]
     feat = np.clip(feat / 255., 0, 1).astype(np.float32)
 
     coord -= coord.min(0)     # TODO ojo que se lo lleva al origen de coordenadas
