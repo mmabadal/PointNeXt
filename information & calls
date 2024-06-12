@@ -2,18 +2,39 @@
 ---- OLD CALLS ----
 
 CUDA_VISIBLE_DEVICES=0 python examples/segmentation/main.py --cfg cfgs/s3dis/pointnext-s.yaml
-
-
 CUDA_VISIBLE_DEVICES=0 bash script/main_segmentation.sh cfgs/s3dis/pointnext-s.yaml wandb.use_wandb=False mode=test --pretrained_path log/s3dis/s3dis-train-pointnext-s-ngpus1-20240412-095302-frbazgqEBvroUaNLVjXUzB/checkpoint/s3dis-train-pointnext-s-ngpus1-20240412-095302-frbazgqEBvroUaNLVjXUzB_ckpt_best.pth visualize=True
 
 ---- NEW CALLS ----
 
-CUDA_VISIBLE_DEVICES=0 python examples/segmentation/train.py --cfg cfgs/pipes/pointnext-s-pipes.yaml --data data/pipes/pool/split_1/
+params in config:
 
+dataset:
+  common:
+    NAME: PIPES
+    voxel_size: 0.01
+model:
+  cls_args:
+    num_classes: 3
+batch_size: 8
+val_batch_size: 1
+epochs: 100
+early: 9999
+points: 6000
+num_classes: 3
+classes: ['floor', 'pipe', 'valve']
+cmap: [[0, 0, 0], [0, 255, 0], [0, 0, 255]]
+num_per_class: [242967508, 19798250, 4955829]
+cls_weighed_loss: False
+optimizer:
+ NAME: 'adamw'
+ weight_decay: 1.0e-4
+min_lr: 1.0e-5
+lr: 0.01
+log_dir: 'pipes'
 
-CUDA_VISIBLE_DEVICES=0 python examples/segmentation/inference.py --cfg  cfgs/pipes/pointnext-s-pipes.yaml wandb.use_wandb=False mode=test --pretrained_path log/pipes/pipes-train-pointnext-s-pipes-ngpus1-20240502-110919-RAGAHQqVB3sFTysij4m4u3/checkpoint/pipes-train-pointnext-s-pipes-ngpus1-20240502-110919-RAGAHQqVB3sFTysij4m4u3_ckpt_best.pth visualize=True --data data/pipes/test_3/
-
-
+CUDA_VISIBLE_DEVICES=0 python examples/segmentation/train.py --cfg cfgs/pipes/pointnext-s-pipes.yaml --path_trainval data/pipes/pool/split_1/ --path_test data/pipes/pool/test/ --run_name "s-001"
+CUDA_VISIBLE_DEVICES=0 python examples/segmentation/inference.py --path_model log/pipes/s-001/ --path_test data/pipes/pool/test/
+CUDA_VISIBLE_DEVICES=0 python examples/segmentation/inference_online.py --path_model log/pipes/s-001-sub6k/ --path_test data/pipes/pool/test_online/ --path_out log/pipes/s-001-sub6k/visualization_online
 
 ---- THINGS DONE -----
 
@@ -30,9 +51,13 @@ CUDA_VISIBLE_DEVICES=0 python examples/segmentation/inference.py --cfg  cfgs/pip
  
  - loop - epoch
  
- - early stopping
+ - early stopping - reverted
  
  - weights
+
+ - sub points
+
+ - online inference
 
   
 ---- ADAPT NEW DATASET ----
