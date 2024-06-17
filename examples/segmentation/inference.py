@@ -282,7 +282,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser('Scene segmentation training/testing')
     parser.add_argument('--path_model', type=str, required=True, help='config file')
     parser.add_argument('--path_test', type=str, required=True, help='config file')
-    parser.add_argument('--profile', action='store_true', default=False, help='set to True to profile speed')
     args, opts = parser.parse_known_args()
 
     for file in os.listdir(os.path.join(args.path_model, 'checkpoint')):

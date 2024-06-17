@@ -28,20 +28,6 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
-def write_to_csv(oa, macc, miou, ious, best_epoch, cfg, write_header=True):
-    ious_table = [f'{item:.2f}' for item in ious]
-    header = ['method', 'OA', 'mACC', 'mIoU'] + cfg.classes + ['best_epoch', 'log_path', 'wandb link']
-    data = [cfg.cfg_basename, f'{oa:.2f}', f'{macc:.2f}',
-            f'{miou:.2f}'] + ious_table + [str(best_epoch), cfg.run_dir,
-                                           wandb.run.get_url() if cfg.wandb.use_wandb else '-']
-    with open(cfg.csv_path, 'a', encoding='UTF8', newline='') as f:
-        writer = csv.writer(f)
-        if write_header:
-            writer.writerow(header)
-        writer.writerow(data)
-        f.close()
-
-
 def generate_test_list(cfg):
     test_list = sorted(os.listdir(cfg.path_test))
     test_list = [os.path.join(cfg.path_test, item) for item in test_list]
@@ -127,20 +113,6 @@ def main(gpu, cfg):
     # optionally resume from a checkpoint
     model_module = model.module if hasattr(model, 'module') else model
     best_epoch, best_val = load_checkpoint(model, pretrained_path=cfg.pretrained_path)
-#     test_miou, test_macc, test_oa, test_ious, test_accs, _ = test(model, data_list, cfg)
-
-
-# @torch.no_grad()
-# def test(model, data_list, cfg, num_votes=1):
-#     """using a part of original point cloud as input to save memory.
-#     Args:
-#         model (_type_): _description_
-#         test_loader (_type_): _description_
-#         cfg (_type_): _description_
-#         num_votes (int, optional): _description_. Defaults to 1.
-#     Returns:
-#         _type_: _description_
-#     """
 
 
     model.eval()  # set model to eval mode
@@ -162,17 +134,12 @@ def main(gpu, cfg):
     gravity_dim = cfg.datatransforms.kwargs.gravity_dim
     nearest_neighbor = cfg.get('test_mode', 'multi_voxel') == 'nearest_neighbor'
 
-    # while 1
-        # get folder list
-        # for each file in list
-            # infer file and delete
     while 1:
 
         data_list = generate_test_list(cfg)
 
         for file_path in data_list:
 
-            cm = ConfusionMatrix(num_classes=cfg.num_classes, ignore_index=cfg.ignore_index)
             all_logits = []
             coord, feat, idx_points, voxel_idx, reverse_idx_part, reverse_idx  = load_data(file_path, cfg)
 
@@ -238,10 +205,7 @@ if __name__ == "__main__":
     parser.add_argument('--path_model', type=str, required=True, help='config file')
     parser.add_argument('--path_test', type=str, required=True, help='config file')
     parser.add_argument('--path_out', type=str, required=True, help='config file')
-    parser.add_argument('--profile', action='store_true', default=False, help='set to True to profile speed')
     args, opts = parser.parse_known_args()
-
-
 
     for file in os.listdir(os.path.join(args.path_model, 'checkpoint')):
         if "best" in file:
@@ -275,7 +239,6 @@ if __name__ == "__main__":
     cfg.sync_bn = cfg.world_size > 1
 
     # init log dir
-    #cfg.task_name = args.cfg.split('.')[-2].split('/')[-2]  # task/dataset name, \eg s3dis, modelnet40_cls
     cfg.task_name = cfg.log_dir
     cfg.cfg_basename = path_cfg.split('.')[-2].split('/')[-1]  # cfg_basename, \eg pointnext-xl
     tags = [
