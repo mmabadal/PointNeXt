@@ -9,7 +9,6 @@ import copy
 import project_inst
 import map_utils
 import open3d as o3d
-#import info_proc
 import expand_polygon
 import get_info
 import get_instances

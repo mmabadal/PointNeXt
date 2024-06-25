@@ -7,9 +7,7 @@ if you only wana use 1 GPU, set `CUDA_VISIBLE_DEVICES` accordingly
 import math
 import copy
 import project_inst
-import map_utils
 import open3d as o3d
-#import info_proc
 import expand_polygon
 import get_info
 import get_instances
@@ -191,8 +189,8 @@ class Pointcloud_Seg:
         # Set class image publishers
         self.pub_pc_base = rospy.Publisher("/stereo_down/scaled_x2/points2_base", PointCloud2, queue_size=4)
         self.pub_pc_seg = rospy.Publisher("/stereo_down/scaled_x2/points2_seg", PointCloud2, queue_size=4)
-        self.pub_pc_inst = rospy.Publisher("/stereo_ch3/scaled_x4/points2_inst", PointCloud2, queue_size=4)
-        self.pub_pc_info = rospy.Publisher("/stereo_ch3/scaled_x4/points2_info", PointCloud2, queue_size=4)
+        self.pub_pc_inst = rospy.Publisher("/stereo_down/scaled_x2/points2_inst", PointCloud2, queue_size=4)
+        self.pub_pc_info = rospy.Publisher("/stereo_down/scaled_x2/points2_info", PointCloud2, queue_size=4)
 
         # Set segmentation timer
         self.fps = 1.0                # target fps        //PARAM
