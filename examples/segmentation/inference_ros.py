@@ -4,7 +4,18 @@ This file currently supports training and testing on S3DIS
 If more than 1 GPU is provided, will launch multi processing distributed training by default
 if you only wana use 1 GPU, set `CUDA_VISIBLE_DEVICES` accordingly
 """
-
+import math
+import copy
+import project_inst
+import map_utils
+import open3d as o3d
+#import info_proc
+import expand_polygon
+import get_info
+import get_instances
+import conversion_utils
+from natsort import natsorted
+import time
 import struct
 import glob
 import __init__
@@ -45,13 +56,76 @@ class Pointcloud_Seg:
 
     def __init__(self, name):
 
+
+        self.col_inst = {
+        0: [255, 255, 0],
+        1: [255, 0, 255],
+        2: [0, 255, 255],
+        3: [0, 128, 0],
+        4: [0, 0, 128],
+        5: [128, 0, 0],
+        6: [0, 255, 0],
+        7: [0, 0, 255],
+        8: [255, 0, 0],
+        9: [0, 100, 0],
+        10: [0, 0, 100],
+        11: [100, 0, 0],
+        12: [100, 0, 255],
+        13: [0, 255, 100],
+        13: [255, 100, 0]
+        }
+
+        # init get_instances parameters
+        self.rad_p = 0.04               # max distance for pipe growing                             //PARAM
+        self.rad_v = 0.04               # max distance for valve growing                            //PARAM
+        self.dim_p = 3                  # compute 2D (2) or 3D (3) distance for pipe growing        //PARAM
+        self.dim_v = 2                  # compute 2D (2) or 3D (3) distance for valve growing       //PARAM
+        self.min_p_p = 50               # minimum number of points to consider a blob as a pipe     //PARAM
+        self.min_p_v = 30 # 40 80 140   # minimum number of points to consider a blob as a valve    //PARAM
+
+        # get valve matching targets
+        targets_path = "/home/miguel/PointNeXt/valve_targets"
+        self.targets_list = list()
+        for file_name in natsorted(os.listdir(targets_path)):
+            target_path = os.path.join(targets_path, file_name)
+            target = get_info.read_ply(target_path, "model")
+            xyz_central = np.mean(target, axis=0)[0:3]
+            target[:, 0:3] -= xyz_central  
+            target[:, 2] *= -1                                                  # flip Z axis
+            target_o3d = o3d.geometry.PointCloud()
+            target_o3d.points = o3d.utility.Vector3dVector(target[:,0:3])
+            target_o3d.colors = o3d.utility.Vector3dVector(target[:,3:6])
+            target_o3d.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.01, max_nn=15))  # //PARAM
+            target_o3d.orient_normals_to_align_with_direction(orientation_reference=([0, 0, 1]))                    # //PARAM
+            self.targets_list.append(target_o3d)
+
+        self.n_pc = 0
+
+        now = rospy.Time.now()
+        tzero = now-now
+
+        self.T_read = tzero
+        self.T_inferference = tzero
+
+        self.T_instaces_valve = tzero
+        self.T_instaces_pipe = tzero
+
+        self.T_info_valve = tzero
+        self.T_info_pipe = tzero
+
+        self.T_ref_valve = tzero
+        self.T_ref_pipe = tzero
+
+        self.T_publish =  tzero
+        self.T_total = tzero
+
         self.name = name
 
         self.init = False
         self.new_pc = False
 
         path_model = "/home/miguel/PointNeXt/log/pipes/s-001-sub6k"
-        path_out = "/home/miguel/PointNeXt/log/pipes/s-001-sub6k/visualization_ros"
+        path_out = "/home/miguel/PointNeXt/log/pipes/s-001-sub6k/visualization_ros_info"
 
         for file in os.listdir(os.path.join(path_model, 'checkpoint')):
             if "best" in file:
@@ -117,6 +191,8 @@ class Pointcloud_Seg:
         # Set class image publishers
         self.pub_pc_base = rospy.Publisher("/stereo_down/scaled_x2/points2_base", PointCloud2, queue_size=4)
         self.pub_pc_seg = rospy.Publisher("/stereo_down/scaled_x2/points2_seg", PointCloud2, queue_size=4)
+        self.pub_pc_inst = rospy.Publisher("/stereo_ch3/scaled_x4/points2_inst", PointCloud2, queue_size=4)
+        self.pub_pc_info = rospy.Publisher("/stereo_ch3/scaled_x4/points2_info", PointCloud2, queue_size=4)
 
         # Set segmentation timer
         self.fps = 1.0                # target fps        //PARAM
@@ -195,6 +271,7 @@ class Pointcloud_Seg:
     def run(self,_):
 
         rospy.loginfo('[%s]: Running', self.name)	
+        t0 = rospy.Time.now()
 
         # New pc available
         if not self.new_pc:
@@ -230,6 +307,8 @@ class Pointcloud_Seg:
 
         all_logits = []
         coord, feat, idx_points, voxel_idx, reverse_idx_part, reverse_idx  = self.process_data(pc_np) 
+        
+        t1 = rospy.Time.now()
 
         len_part = len(idx_points)
         self.nearest_neighbor = len_part == 1
@@ -273,6 +352,7 @@ class Pointcloud_Seg:
                     break
                 
             all_logits.append(logits)
+        
 
         if error == False:
             all_logits = torch.cat(all_logits, dim=0)
@@ -291,17 +371,331 @@ class Pointcloud_Seg:
             pred = pred.cpu().numpy().squeeze()
             pred = self.cfg.cmap[pred, :]
 
+            t2 = rospy.Time.now()
+
             # output pred labels
             write_obj(coord, feat, os.path.join(self.cfg.path_out, f'{name_out}.obj'))
             # output pred labels
             write_obj(coord, pred, os.path.join(self.cfg.path_out, f'{name_out}_pred.obj'))
+
+            t3 = rospy.Time.now()
+
+
+            pred_sub = np.hstack((coord, feat)) 
             
-            pred_np = np.hstack((coord,pred))
+            class_list = []
+            for row in pred:
+                if row[1] == 1:
+                    class_list.append(1)
+                elif row[2] == 1:
+                    class_list.append(2)
+                else:
+                    class_list.append(0)
+
+            class_np = np.array(class_list)
+
+            pred_sub = np.c_[pred_sub,class_np]
+
+            pred_sub_pipe = pred_sub[pred_sub[:,6] == 1]       # get points predicted as pipe
+            pred_sub_valve = pred_sub[pred_sub[:,6] == 2]     # get points predicted as valve
+
+            # get valve instances
+            instances_ref_valve_list, pred_sub_pipe_ref, stolen_list  = get_instances.get_instances(pred_sub_valve, self.dim_v, self.rad_v, self.min_p_v, ref=True, ref_data = pred_sub_pipe, ref_rad = 0.1)
+            #instances_ref_valve_list, pred_sub_pipe_ref, stolen_list  = get_instances.get_instances_o3d(pred_sub_valve, self.dim_v, self.rad_v, self.min_p_v, ref=True, ref_data = pred_sub_pipe, ref_rad = 0.1)
+            
+            t4 = rospy.Time.now()
+
+            # get valve information
+            info_valves_list = list()
+            for i, inst in enumerate(instances_ref_valve_list): # for each valve instance
+                # transform instance to o3d pointcloud
+                xyz_central = np.mean(inst, axis=0)[0:3]    # get isntance center
+                inst[:, 0:3] -= xyz_central                 # move center to origin
+                inst_o3d = o3d.geometry.PointCloud()
+                inst_o3d.points = o3d.utility.Vector3dVector(inst[:,0:3])
+                inst_o3d.colors = o3d.utility.Vector3dVector(inst[:,3:6])
+                inst_o3d.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.01, max_nn=15)) # compute normal
+                inst_o3d.orient_normals_to_align_with_direction(orientation_reference=([0, 0, 1]))                   # align normals
+                inst[:, 0:3] += xyz_central                                                                          # recover original position
+
+                info_valve = get_info.get_info(inst_o3d, self.targets_list, method="matching")        # get valve instance info list([fitness1, rotation1],[fitness2, rotation2], ...)  len = len(targets_list)
+                max_info =  max(info_valve)                                                      # the max() function compares the first element of each info_list element, which is fitness)
+                max_idx = info_valve.index(max_info)                                             # idx of best valve match
+                
+                rad = math.radians(max_info[1])
+                vector = np.array([math.cos(rad), math.sin(rad), 0])                             # get valve unit vector at zero
+                vector = vector*0.18                                                             # resize vector to valve size //PARAM
+                info_valves_list.append([xyz_central, vector, max_idx, inst[:,0:3], max_info])   # append valve instance info
+
+
+            # based on valve fitness, delete it and return stolen points to pipe prediction
+            descart_valves_list = [i for i, x in enumerate(info_valves_list) if x[4][0] < 0.4]     # if max fitnes < thr  //PARAM
+            for i in descart_valves_list:
+                print("Valve descarted")
+                descarted_points = np.vstack(instances_ref_valve_list[i])                           # notate points to discard
+                if len(stolen_list[i])>0:                                                                  # if there were stolen points
+                    stolen_idx = list(np.vstack(stolen_list[i])[:,0].astype(int))                       # get stolen idx
+                    stolen_cls = np.vstack(stolen_list[i])[:,1].astype(int)                             # get stolen class
+                    stolen_cls = stolen_cls.reshape(stolen_cls.shape[0],1)                              # reshape stolen class
+                    stolen_points = descarted_points[stolen_idx, :-2]                               # recover stolen points
+                    stolen_points = np.concatenate((stolen_points,stolen_cls),axis=1)               # concatenate stolen points and stolen class
+                    pred_sub_pipe_ref = np.concatenate((pred_sub_pipe_ref,stolen_points),axis=0)    # add points and class pipe prediction points
+            
+            for index in sorted(descart_valves_list, reverse=True):                                 # delete discarted valve info                                                                             
+                del info_valves_list[index]
+                del instances_ref_valve_list[index]     # for print only  
+            t5 = rospy.Time.now()
+
+            # get pipe instances
+            instances_ref_pipe_list, _, _  = get_instances.get_instances(pred_sub_pipe_ref, self.dim_p, self.rad_p, self.min_p_p)
+            #instances_ref_pipe_list, _, _  = get_instances.get_instances_o3d(pred_sub_pipe_ref, self.dim_p, self.rad_p, self.min_p_p)
+            t6 = rospy.Time.now()
+
+            info_pipes_list = list()
+            info_connexions_list = list()
+            k_pipe = 0
+
+            for i, inst in enumerate(instances_ref_pipe_list): # for each pipe instance
+
+                info_pipe = get_info.get_info(inst, models=0, method="skeleton") # get pipe instance info list( list( list(chain1, start1, end1, elbow_list1, vector_chain_list1), ...), list(connexions_points)) 
+                
+                for j, pipe_info in enumerate(info_pipe[0]):                         # stack pipes info
+                    inst_list = list()
+                    inst_list.append(i)
+                    pipe_info.append(inst_list)
+                    info_pipes_list.append(pipe_info)
+
+                for j, connexion_info in enumerate(info_pipe[1]):                    # stack conenexions info
+                    connexion_info[1] = [x+k_pipe for x in connexion_info[1]]
+                    info_connexions_list.append(connexion_info)
+
+                k_pipe += len(info_pipe[0])                                          # update actual pipe idx
+            t7 = rospy.Time.now()
+
+            info_pipes_list_copy = copy.deepcopy(info_pipes_list) 
+            info_connexions_list_copy = copy.deepcopy(info_connexions_list)
+            info_pipes_list2, info_connexions_list2 = get_info.unify_chains(info_pipes_list_copy, info_connexions_list_copy)
+            t8 = rospy.Time.now()
+
+            info_valves_list_copy = copy.deepcopy(info_valves_list)
+            info_valves_list2 = get_info.refine_valves(info_valves_list_copy, info_pipes_list2) 
+            t9 = rospy.Time.now()
+
+            info1 = [info_pipes_list, info_connexions_list, info_valves_list, instances_ref_pipe_list]
+            #info2 = [info_pipes_list2, info_connexions_list2, info_valves_list, instances_ref_pipe_list] 
+            info3 = [info_pipes_list2, info_connexions_list2, info_valves_list2, instances_ref_pipe_list]
+
+            empty1 = False
+            if len(info_pipes_list)==0 and len(info_connexions_list)==0 and len(info_valves_list)==0 and len(instances_ref_pipe_list)==0:
+                empty1 = True
+            
+            empty3 = False
+            if len(info_pipes_list2)==0 and len(info_connexions_list2)==0 and len(info_valves_list2)==0 and len(instances_ref_pipe_list)==0:
+                empty3 = True
+
+            if empty1==False:
+                path_out1 = os.path.join(self.cfg.path_out, name_out +'_info.ply')
+                conversion_utils.info_to_ply(info1, path_out1)
+                
+            #path_out2 = os.path.join(self.cfg.path_out, name_out +'_info2.ply')
+            #conversion_utils.info_to_ply(info2, path_out2)
+
+            if empty3==False:
+
+                info_array = conversion_utils.info_to_array(info3)
+                pc_info = self.array2pc_info(header, info_array)
+                self.pub_pc_info.publish(pc_info)
+
+                path_out3 = os.path.join(self.cfg.path_out, name_out +'_info_ref.ply')
+                conversion_utils.info_to_ply(info3, path_out3)
+
+                info3_array = conversion_utils.info_to_array(info3)
+                path_out3_array = os.path.join(self.cfg.path_out, name_out +'_info_ref.npy')
+                np.save(path_out3_array, info3)
+
+                fout_inst = open(os.path.join(self.cfg.path_out, name_out +'_info_ref.txt'), 'w')
+                fout_inst.write('    x         y         z   type  info class inst    \n')
+                for i in range(info3_array.shape[0]):
+                    if info3_array[i,6]!= 0 and info3_array[i,6]!= 4 and info3_array[i,6]!= 6 and info3_array[i,6]!= 7:
+                        fout_inst.write('%f %f %f  %d     %d     %d     %d\n' % (info3_array[i,0], info3_array[i,1], info3_array[i,2], info3_array[i,6], info3_array[i,7], info3_array[i,8], info3_array[i,9]))
+            # print info
+
+            print(" ")
+            print("INFO VALVES:")
+            for valve in info_valves_list:
+                valve.pop(-2)
+                print(valve)
+            print(" ")
+
+            print("INFO VALVES2:")
+            for valve in info_valves_list2:
+                valve.pop(-2)
+                print(valve)
+            print(" ")
+
+            print("INFO PIPES:")
+            for pipe1 in info_pipes_list:
+                pipe1.pop(0)
+                print(pipe1)
+            print(" ")
+
+            print("INFO PIPES2")
+            for pipe2 in info_pipes_list2:
+                pipe2.pop(0)
+                print(pipe2)
+            print(" ")
+
+            print("INFO CONNEXIONS:")
+            for connexion in info_connexions_list:
+                print(connexion)
+            print(" ")
+
+            print("INFO CONNEXIONS2:")
+            for connexion in info_connexions_list2:
+                print(connexion)
+            print(" ")
+
+            # PRINTS
+
+            i = len(instances_ref_valve_list)
+
+            if len(instances_ref_valve_list)>0:
+                instances_ref_valve = np.vstack(instances_ref_valve_list)
+            if len(instances_ref_pipe_list)>0:
+                instances_ref_pipe = np.vstack(instances_ref_pipe_list)
+                instances_ref_pipe[:,7] = instances_ref_pipe[:,7]+i
+
+            if len(instances_ref_valve_list)>0 and len(instances_ref_pipe_list)>0:
+                instances_ref = np.concatenate((instances_ref_valve, instances_ref_pipe), axis=0)
+            elif len(instances_ref_valve_list)==0 and len(instances_ref_pipe_list)>0:
+                instances_ref = instances_ref_pipe
+            elif len(instances_ref_valve_list)>0 and len(instances_ref_pipe_list)==0:
+                instances_ref = instances_ref_valve
+            else:
+                instances_ref = None
+
+            if instances_ref is None: # if instances were not found
+                rospy.loginfo('[%s]: No instances found', self.name)	
+                return
+
+            fout_sub = open(os.path.join(self.cfg.path_out, name_out +'_pred_sub.obj'), 'w')
+            fout_sub_col = open(os.path.join(self.cfg.path_out, name_out +'_pred_sub_col.obj'), 'w')
+            for i in range(pred_sub.shape[0]):
+                fout_sub.write('v %f %f %f %d %d %d %d\n' % (pred_sub[i,0], pred_sub[i,1], pred_sub[i,2], int(pred_sub[i,3]*255), int(pred_sub[i,4]*255), int(pred_sub[i,5]*255), pred_sub[i,6]))
+            for i in range(pred_sub.shape[0]):
+                color = self.cfg.cmap[int(pred_sub[i,6])]
+                fout_sub_col.write('v %f %f %f %d %d %d %d\n' % (pred_sub[i,0], pred_sub[i,1], pred_sub[i,2], color[0], color[1], color[2], pred_sub[i,6]))
+
+            if instances_ref is not None: # if instances were found
+                fout_inst = open(os.path.join(self.cfg.path_out, name_out +'_pred_inst_ref.obj'), 'w')
+                fout_inst_col = open(os.path.join(self.cfg.path_out, name_out +'_pred_inst_ref_col.obj'), 'w')
+                for i in range(instances_ref.shape[0]):
+                    fout_inst.write('v %f %f %f %d %d %d %d %d\n' % (instances_ref[i,0], instances_ref[i,1], instances_ref[i,2], int(instances_ref[i,3]*255), int(instances_ref[i,4]*255), int(instances_ref[i,5]*255), instances_ref[i,6], instances_ref[i,7]))
+                for i in range(instances_ref.shape[0]):
+                    color = self.col_inst[instances_ref[i,7]]
+                    fout_inst_col.write('v %f %f %f %d %d %d %d %d\n' % (instances_ref[i,0], instances_ref[i,1], instances_ref[i,2], color[0], color[1], color[2], instances_ref[i,6], instances_ref[i,7]))
+            
             # publishers
-            pc_base = self.array2pc(header, pc_np)   # TODO
+            pred_np = np.hstack((coord,pred))
+            pc_base = self.array2pc(header, pc_np) 
             pc_seg = self.array2pc(header, pred_np)
+            pc_inst = self.array2pc(header, instances_ref)
             self.pub_pc_base.publish(pc_base)
             self.pub_pc_seg.publish(pc_seg)
+            self.pub_pc_inst.publish(pc_inst)
+
+            #publish info TODO + check all things published are ok TODO
+
+            t10 = rospy.Time.now()
+
+            time_read = t1-t0
+            time_inferference = t2-t1
+
+            time_instaces_valve = t4-t3
+            time_instaces_pipe = t6-t5
+            time_instaces = time_instaces_valve + time_instaces_pipe
+
+            time_info_valve = t5-t4
+            time_info_pipe = t7-t6
+            time_info = time_info_valve + time_info_pipe
+
+            time_ref_valve = t9-t8
+            time_ref_pipe = t8-t7
+            time_ref = time_ref_valve + time_ref_pipe
+
+            time_publish = t10-t9
+            time_total = t10-t0
+            
+            # print time info
+            print('INFO TIMES:')	
+            print("")
+            print('Pc processing took seconds. Split into:' + str(time_total))
+            print('Reading -------- seconds ' + str(time_read) + '  percentaje: ' + str((time_read/time_total)*100))
+            print('Inference ------ seconds ' + str(time_inferference) + '  percentaje: ' + str((time_inferference/time_total)*100))
+            print('Instances ------ seconds ' + str(time_instaces) + '  percentaje: ' + str((time_instaces/time_total)*100))
+            print(' - Valve - seconds ' + str(time_instaces_valve) + '  percentaje: ' + str((time_instaces_valve/time_total)*100))
+            print(' - Pipe -- seconds ' + str(time_instaces_pipe) + '  percentaje: ' + str((time_instaces_pipe/time_total)*100))
+            print('Info ----------- seconds ' + str(time_info) + '  percentaje: ' + str((time_info/time_total)*100))
+            print(' - Valve - seconds ' + str(time_info_valve) + '  percentaje: ' + str((time_info_valve/time_total)*100))
+            print(' - Pipe -- seconds ' + str(time_info_pipe) + '  percentaje: ' + str((time_info_pipe/time_total)*100))
+            print('Refine --------- seconds ' + str(time_ref) + '  percentaje: ' + str((time_ref/time_total)*100))
+            print(' - Valve - seconds ' + str(time_ref_valve) + '  percentaje: ' + str((time_ref_valve/time_total)*100))
+            print(' - Pipe -- seconds ' + str(time_ref_pipe) + '  percentaje: ' + str((time_ref_pipe/time_total)*100))
+            print('Publish -------- seconds ' + str(time_publish) + '  percentaje: ' + str((time_publish/time_total)*100))
+
+            print(" ")
+            print(" ")
+            print("--------------------------------------------------------------------------------------------------")
+            print("--------------------------------------------------------------------------------------------------")
+            print(" ")
+            print(" ")
+
+
+            self.T_read = self.T_read + time_read
+            self.T_inferference = self.T_inferference + time_inferference
+
+            self.T_instaces_valve = self.T_instaces_valve + time_instaces_valve
+            self.T_instaces_pipe = self.T_instaces_pipe + time_instaces_pipe
+            self.T_instaces = self.T_instaces_valve + self.T_instaces_pipe
+
+            self.T_info_valve = self.T_info_valve + time_info_valve
+            self.T_info_pipe = self.T_info_pipe + time_info_pipe
+            self.T_info = self.T_info_valve + self.T_info_pipe
+
+            self.T_ref_valve = self.T_ref_valve + time_ref_valve
+            self.T_ref_pipe = self.T_ref_pipe + time_ref_pipe
+            self.T_ref = self.T_ref_valve + self.T_ref_pipe
+
+            self.T_publish =  self.T_publish + time_publish
+            self.T_total = self.T_total + time_total
+
+            self.n_pc = self.n_pc + 1
+
+            # print time info mean
+            print('INFO TIMES MEAN:')	
+            print("")
+            print('Pc processing took seconds. Split into:' + str((self.T_total)/self.n_pc))
+            print('Reading -------- seconds ' + str((self.T_read)/self.n_pc) + '  percentaje: ' + str((self.T_read/self.T_total)*100))
+            print('Inference ------ seconds ' + str((self.T_inferference)/self.n_pc) + '  percentaje: ' + str((self.T_inferference/self.T_total)*100))
+            print('Instances ------ seconds ' + str((self.T_instaces)/self.n_pc) + '  percentaje: ' + str((self.T_instaces/self.T_total)*100))
+            print(' - Valve - seconds ' + str((self.T_instaces_valve)/self.n_pc) + '  percentaje: ' + str((self.T_instaces_valve/self.T_total)*100))
+            print(' - Pipe -- seconds ' + str((self.T_instaces_pipe)/self.n_pc) + '  percentaje: ' + str((self.T_instaces_pipe/self.T_total)*100))
+            print('Info ----------- seconds ' + str((self.T_info)/self.n_pc) + '  percentaje: ' + str((self.T_info/self.T_total)*100))
+            print(' - Valve - seconds ' + str((self.T_info_valve)/self.n_pc) + '  percentaje: ' + str((self.T_info_valve/self.T_total)*100))
+            print(' - Pipe -- seconds ' + str((self.T_info_pipe)/self.n_pc) + '  percentaje: ' + str((self.T_info_pipe/self.T_total)*100))
+            print('Refine --------- seconds ' + str((self.T_ref)/self.n_pc) + '  percentaje: ' + str((self.T_ref/self.T_total)*100))
+            print(' - Valve - seconds ' + str((self.T_ref_valve)/self.n_pc) + '  percentaje: ' + str((self.T_ref_valve/self.T_total)*100))
+            print(' - Pipe -- seconds ' + str((self.T_ref_pipe)/self.n_pc) + '  percentaje: ' + str((self.T_ref_pipe/self.T_total)*100))
+            print('Publish -------- seconds ' + str((self.T_publish)/self.n_pc) + '  percentaje: ' + str((self.T_publish/self.T_total)*100))
+
+            print(" ")
+            print(" ")
+            print("--------------------------------------------------------------------------------------------------")
+            print("--------------------------------------------------------------------------------------------------")
+            print(" ")
+            print(" ")
+
+
 
 
     def process_data(self, data):
@@ -393,6 +787,36 @@ class Pointcloud_Seg:
         pc = pc2.create_cloud(header, fields, points)
         return pc
 
+
+    def array2pc_info(self, header, array):
+
+        fields =   [PointField('x', 0, PointField.FLOAT32, 1),
+                    PointField('y', 4, PointField.FLOAT32, 1),
+                    PointField('z', 8, PointField.FLOAT32, 1),
+                    PointField('rgba', 12, PointField.UINT32, 1),
+                    PointField('t', 16, PointField.FLOAT32, 1),
+                    PointField('info', 20, PointField.FLOAT32, 1),
+                    PointField('c', 24, PointField.FLOAT32, 1),
+                    PointField('inst', 28, PointField.FLOAT32, 1)]
+        
+        points = list()
+
+        for i, p in enumerate(array):
+            r = int(p[3])
+            g = int(p[4])
+            b = int(p[5])
+            a = 255
+
+            if p[6] == 6:                   # if its type instance data, make it transparent, information still there
+                a = 0
+
+            rgb = struct.unpack('I', struct.pack('BBBB', b, g, r, a))[0]
+
+            p_rgb = [p[0], p[1], p[2], rgb, p[6], p[7], p[8], p[9]]
+            points.append(p_rgb)
+
+        pc = pc2.create_cloud(header, fields, points)
+        return pc
 
 if __name__ == "__main__":
     try:

@@ -489,7 +489,7 @@ def main(gpu, cfg):
                 for i in range(instances_ref.shape[0]):
                     fout_inst.write('v %f %f %f %d %d %d %d %d\n' % (instances_ref[i,0], instances_ref[i,1], instances_ref[i,2], int(instances_ref[i,3]*255), int(instances_ref[i,4]*255), int(instances_ref[i,5]*255), instances_ref[i,6], instances_ref[i,7]))
                 for i in range(instances_ref.shape[0]):
-                    color = cfg.cmap[int(pred_sub[i,6])]
+                    color = col_inst[instances_ref[i,7]]
                     fout_inst_col.write('v %f %f %f %d %d %d %d %d\n' % (instances_ref[i,0], instances_ref[i,1], instances_ref[i,2], color[0], color[1], color[2], instances_ref[i,6], instances_ref[i,7]))
 
             t10 = time.time()
