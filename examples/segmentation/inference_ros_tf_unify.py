@@ -88,7 +88,7 @@ class Pointcloud_Seg:
         self.listener = tf.TransformListener()
         
         # inits info map
-        self.info_map_key = False   # TODO DEBUG???
+        self.info_map_key = False
         self.info_pipes_list_map = list()
         self.info_connexions_list_map = list()
         self.info_valves_list_map = list()
@@ -574,7 +574,7 @@ class Pointcloud_Seg:
                             self.count = 0
                             self.info_map = map_utils.clean_map(self.info_map, self.count_thr)
                         
-                        info_map_array = conversion_utils.info_to_array(info_map)
+                        info_map_array = conversion_utils.info_to_array(self.info_map)
                         pc_info_map = self.array2pc_info(header, info_map_array)
                         self.pub_pc_info_map.publish(pc_info_map)
 
