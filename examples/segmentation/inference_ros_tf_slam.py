@@ -149,7 +149,7 @@ class Pointcloud_Seg:
         cfg.pretrained_path = pretrained_path
         cfg.mode =  "test"
 
-        cfg.path_out = path_out
+        cfg.path_out = self.path_out
         os.makedirs(cfg.path_out, exist_ok=True)
 
 
@@ -618,7 +618,7 @@ class Pointcloud_Seg:
                 instances_ref[i,4] = color[1]
                 instances_ref[i,5] = color[2]
 
-            pc_base = self.array2pc(header, pc_np_base)
+            pc_base = self.array2pc(header, pc_np)
             pc_seg = self.array2pc(header, pred_sub)
             pc_inst = self.array2pc(header, instances_ref)
             self.pub_pc_base.publish(pc_base)
