@@ -182,15 +182,15 @@ class Pointcloud_Seg:
         self.gpu = 0
         
         # set subscribers
-        # pc_sub = message_filters.Subscriber('/stereo_down/scaled_x2/points2_filtered', PointCloud2)     # //PARAM
-        pc_sub = message_filters.Subscriber('/stereo_down/scaled_x2/points2', PointCloud2)             # //PARAM
+        # pc_sub = message_filters.Subscriber('/stereo_ch3/scaled_x2/points2_filtered', PointCloud2)     # //PARAM
+        pc_sub = message_filters.Subscriber('/stereo_ch3/scaled_x4/points2', PointCloud2)             # //PARAM
         pc_sub.registerCallback(self.cb_pc)
 
         # Set class image publishers
-        self.pub_pc_base = rospy.Publisher("/stereo_down/scaled_x2/points2_base", PointCloud2, queue_size=4)
-        self.pub_pc_seg = rospy.Publisher("/stereo_down/scaled_x2/points2_seg", PointCloud2, queue_size=4)
-        self.pub_pc_inst = rospy.Publisher("/stereo_down/scaled_x2/points2_inst", PointCloud2, queue_size=4)
-        self.pub_pc_info = rospy.Publisher("/stereo_down/scaled_x2/points2_info", PointCloud2, queue_size=4)
+        self.pub_pc_base = rospy.Publisher("/stereo_ch3/scaled_x4/points2_base", PointCloud2, queue_size=4)
+        self.pub_pc_seg = rospy.Publisher("/stereo_ch3/scaled_x4/points2_seg", PointCloud2, queue_size=4)
+        self.pub_pc_inst = rospy.Publisher("/stereo_ch3/scaled_x4/points2_inst", PointCloud2, queue_size=4)
+        self.pub_pc_info = rospy.Publisher("/stereo_ch3/scaled_x4/points2_info", PointCloud2, queue_size=4)
 
         # Set segmentation timer
         self.fps = 1.0                # target fps        //PARAM
