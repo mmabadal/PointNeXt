@@ -12,7 +12,7 @@ import project_inst
 import map_utils
 import open3d as o3d
 import expand_polygon
-import info_proc
+#import info_proc
 import get_info
 import get_instances
 import conversion_utils
@@ -49,7 +49,7 @@ import ctypes
 from scipy.spatial.transform import Rotation as Rot
 import message_filters
 from std_msgs.msg import Int32
-from dgcnn.msg import info_bbs
+#from dgcnn.msg import info_bbs
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Image
 from sensor_msgs.msg import CameraInfo
@@ -96,7 +96,7 @@ class Pointcloud_Seg:
         self.min_p_v = 30 # 40 80 140   # minimum number of points to consider a blob as a valve    //PARAM
 
         # get valve matching targets
-        targets_path = "../valve_targets"
+        targets_path = "valve_targets"
         self.targets_list = list()
         for file_name in natsorted(os.listdir(targets_path)):
             target_path = os.path.join(targets_path, file_name)
@@ -117,21 +117,21 @@ class Pointcloud_Seg:
 
         self.new_pc = False
 
-        path_model = "../log/pipes/s-001-sub6k"
+        path_model = "log/pipes/s-001-sub6k"
 
         self.loop = 0
 
         self.out = True
         self.print = True
         self.time = True
-        self.path = rospy.get_param('/lanty2/slamon/working_path', "../out")
-        self.path_out = os.path.join(self.path, "pipes")
+        self.path = rospy.get_param('/girona500/slamon/working_path', "../out")
+        self.path_out = "log/pipes/s-001-sub6k/visualization_slam"
 
         self.path_graph_remote = os.path.join(self.path, "keyframes_poses.txt")
-        self.path_graph_local = "../../keyframes_poses.txt"
-        self.rsync_command = "rsync -a conbonuc@192.168.1.191:" + path_graph_remote + " " + path_graph_local
+        self.path_graph_local = "keyframes_poses.txt"
+        self.rsync_command = "rsync -a conbonuc@192.168.1.191:" + self.path_graph_remote + " " + self.path_graph_local
 
-        self.infobbs = info_bbs()
+        #self.infobbs = info_bbs()
 
         if not os.path.exists(self.path_out):
             os.makedirs(self.path_out)
@@ -193,21 +193,21 @@ class Pointcloud_Seg:
         self.gpu = 0
         
         # set subscribers
-        pc_sub = message_filters.Subscriber('/lanty2/map_slamon/keycloud', Image)         # //PARAM
-        odom_sub = message_filters.Subscriber('/lanty2/map_slamon/map', Odometry)      # //PARAM
+        pc_sub = message_filters.Subscriber('/girona500/map_slamon/keycloud', PointCloud2)         # //PARAM
+        odom_sub = message_filters.Subscriber('/girona500/map_slamon/robot_map', Odometry)      # //PARAM
 
         ts_pc_odom = message_filters.ApproximateTimeSynchronizer([pc_sub, odom_sub], queue_size=10, slop=0.001)
         ts_pc_odom.registerCallback(self.cb_pc)
 
-        loop_sub = message_filters.Subscriber('/lanty2/map_slamon/loop_closure_num', Int32)
+        loop_sub = message_filters.Subscriber('/girona500/map_slamon/loop_closure_num', Int32)
         loop_sub.registerCallback(self.cb_loop)
 
         # Set class image publishers
-        self.pub_pc_base = rospy.Publisher("/lanty2/map_slamon/points2_base", PointCloud2, queue_size=4)
-        self.pub_pc_seg = rospy.Publisher("/lanty2/map_slamon/points2_seg", PointCloud2, queue_size=4)
-        self.pub_pc_inst = rospy.Publisher("/lanty2/map_slamon/points2_inst", PointCloud2, queue_size=4)
-        self.pub_pc_info = rospy.Publisher("/lanty2/map_slamon/points2_info", PointCloud2, queue_size=4)
-        self.pub_pc_info_world = rospy.Publisher("/lanty2/map_slamon/points2_info_world", PointCloud2, queue_size=4)
+        self.pub_pc_base = rospy.Publisher("/girona500/map_slamon/points2_base", PointCloud2, queue_size=4)
+        self.pub_pc_seg = rospy.Publisher("/girona500/map_slamon/points2_seg", PointCloud2, queue_size=4)
+        self.pub_pc_inst = rospy.Publisher("/girona500/map_slamon/points2_inst", PointCloud2, queue_size=4)
+        self.pub_pc_info = rospy.Publisher("/girona500/map_slamon/points2_info", PointCloud2, queue_size=4)
+        self.pub_pc_info_world = rospy.Publisher("/girona500/map_slamon/points2_info_world", PointCloud2, queue_size=4)
 
         self.set_model()
 
@@ -535,7 +535,8 @@ class Pointcloud_Seg:
                     for i in range(pred_sub.shape[0]):
                         fout_base.write('v %f %f %f %d %d %d\n' % (pred_sub[i,0], pred_sub[i,1], pred_sub[i,2], pred_sub[i,3], pred_sub[i,4], pred_sub[i,5]))
                     for i in range(pred_sub.shape[0]):
-                        color = self.label2color[pred_sub[i,6]]
+                        color = self.cfg.cmap[int(pred_sub[i,6])]
+
                         fout_pred.write('v %f %f %f %d %d %d\n' % (pred_sub[i,0], pred_sub[i,1], pred_sub[i,2], color[0], color[1], color[2]))
                     
 
@@ -546,7 +547,7 @@ class Pointcloud_Seg:
                     for i in range(pred_sub_world.shape[0]):
                         fout_base.write('v %f %f %f %d %d %d\n' % (pred_sub_world[i,0], pred_sub_world[i,1], pred_sub_world[i,2], pred_sub_world[i,3], pred_sub_world[i,4], pred_sub_world[i,5]))
                     for i in range(pred_sub_world.shape[0]):
-                        color = self.label2color[pred_sub_world[i,6]]
+                        color = self.cfg.cmap[int(pred_sub_world[i,6])]
                         fout_pred.write('v %f %f %f %d %d %d\n' % (pred_sub_world[i,0], pred_sub_world[i,1], pred_sub_world[i,2], color[0], color[1], color[2]))
 
                 header.frame_id = "camera_left"
@@ -600,7 +601,7 @@ class Pointcloud_Seg:
             rospy.loginfo('[%s]: --- instances found!!!', self.name)	
 
             for i in range(pred_sub.shape[0]):
-                color = self.label2color[pred_sub[i,6]]
+                color = self.cfg.cmap[int(pred_sub[i,6])]
                 pred_sub[i,3] = color[0]
                 pred_sub[i,4] = color[1]
                 pred_sub[i,5] = color[2]
@@ -764,6 +765,13 @@ class Pointcloud_Seg:
     
 
     def update_positions(self):
+
+        print("UPDATING POSITIONSSSSSSSS")
+        print("UPDATING POSITIONSSSSSSSS")
+        print("UPDATING POSITIONSSSSSSSS")
+        print("UPDATING POSITIONSSSSSSSS")
+        print("UPDATING POSITIONSSSSSSSS")
+        print("UPDATING POSITIONSSSSSSSS")
 
         tq_baselink_stereodown = np.array([0.57, -0.062, 0.505, 0.0, 0.0, 0.0, 1.0])
         t_baselink_stereodown = tq_baselink_stereodown[:3]
