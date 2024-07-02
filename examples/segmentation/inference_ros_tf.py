@@ -544,7 +544,7 @@ class Pointcloud_Seg:
                         for i in range(pred_sub_world.shape[0]):
                             fout_base.write('v %f %f %f %d %d %d\n' % (pred_sub_world[i,0], pred_sub_world[i,1], pred_sub_world[i,2], pred_sub_world[i,3], pred_sub_world[i,4], pred_sub_world[i,5]))
                         for i in range(pred_sub_world.shape[0]):
-                            color = self.label2color[pred_sub_world[i,6]]
+                            color = self.cfg.cmap[int(pred_sub_world[i,6])]
                             fout_pred.write('v %f %f %f %d %d %d\n' % (pred_sub_world[i,0], pred_sub_world[i,1], pred_sub_world[i,2], color[0], color[1], color[2]))
 
                     header.frame_id = "turbot/stereo_down/left_optical"            
