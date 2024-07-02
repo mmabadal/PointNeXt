@@ -4,7 +4,7 @@ import ros_numpy
 import numpy as np
 from PIL import Image
 from skimage import io, color
-from PointNext.msg import info_bbs
+from PointNeXt.msg import info_bbs
 from sensor_msgs.msg import CameraInfo
 from geometry_msgs.msg import Point32, Polygon
 
