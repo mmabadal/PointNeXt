@@ -124,7 +124,10 @@ class Pointcloud_Seg:
         self.time = True
         self.path = rospy.get_param('/lanty2/slamon/working_path', "../out")
         self.path_out = os.path.join(self.path, "pipes")
-        self.path_graph = os.path.join(self.path, "keyframes_poses.txt")
+
+        self.path_graph_remote = os.path.join(self.path, "keyframes_poses.txt")
+        self.path_graph_local = "../../keyframes_poses.txt"
+        self.rsync_command = "rsync -a conbonuc@192.168.1.191:" + path_graph_remote + " " + path_graph_local
 
         self.infobbs = info_bbs()
 
@@ -217,6 +220,7 @@ class Pointcloud_Seg:
 
 
     def cb_pc(self, img, disp, pc, odom, c_info):
+        os.system(self.rsync_command)
         self.img = img
         self.disp = disp
         self.pc = pc
@@ -227,6 +231,7 @@ class Pointcloud_Seg:
     def cb_loop(self, loop):
         #print("loop is: " + str(self.loop))
         if loop.data != self.loop:
+            os.system(self.rsync_command)
             self.loop = loop.data
             self.update_positions()
 
@@ -553,7 +558,7 @@ class Pointcloud_Seg:
                 header.frame_id = "camera_left"
 
                 # TODO: CHECK restar tiempos y check de que no haya pasado más de 0,1 segundos
-                file_id = open(self.path_graph, 'r')
+                file_id = open(self.path_graph_local, 'r')
                 lines = file_id.readlines()[1:]
                 #print(f"Raw pc header: {header}")
                 for line in lines:
@@ -786,7 +791,7 @@ class Pointcloud_Seg:
         tr_baselink_stereodown = self.get_tr(t_baselink_stereodown, q_baselink_stereodown)
         tr_stereodown_leftoptical = self.get_tr(t_stereodown_leftoptical, q_stereodown_leftoptical)
 
-        file_tq = open(self.path_graph, 'r')
+        file_tq = open(self.path_graph_local, 'r')
         lines = file_tq.readlines()[1:]
         for line in lines:
 
