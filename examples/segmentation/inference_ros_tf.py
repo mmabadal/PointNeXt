@@ -839,7 +839,7 @@ class Pointcloud_Seg:
 
 if __name__ == "__main__":
     try:
-        rospy.init_node('seg_pc')
+        rospy.init_node('seg_pc_pointnext')
         Pointcloud_Seg(rospy.get_name())
         rospy.spin()
     except rospy.ROSInterruptException:
