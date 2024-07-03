@@ -128,7 +128,7 @@ class Pointcloud_Seg:
         self.path_out = "log/pipes/s-001-sub6k/visualization_slam"
 
         self.path_graph_remote = os.path.join(self.path, "keyframes_poses.txt")
-        self.path_graph_local = "keyframes_poses.txt"
+        self.path_graph_local = "log/pipes/s-001-sub6k/visualization_slam/keyframes_poses.txt"
         self.rsync_command = "rsync -a conbonuc@192.168.1.191:" + self.path_graph_remote + " " + self.path_graph_local
 
         #self.infobbs = info_bbs()
@@ -750,7 +750,7 @@ class Pointcloud_Seg:
         t_baselink_stereodown = tq_baselink_stereodown[:3]
         q_baselink_stereodown = tq_baselink_stereodown[3:]
 
-        tq_stereodown_leftoptical = np.array([0.0, 0.0, 0.0, 0.0, 0.706825181105366, 0.7073882691671998, 1.0])
+        tq_stereodown_leftoptical = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.706825181105366, 0.7073882691671998])
         t_stereodown_leftoptical = tq_stereodown_leftoptical[:3]
         q_stereodown_leftoptical = tq_stereodown_leftoptical[3:]
 
@@ -766,18 +766,11 @@ class Pointcloud_Seg:
 
     def update_positions(self):
 
-        print("UPDATING POSITIONSSSSSSSS")
-        print("UPDATING POSITIONSSSSSSSS")
-        print("UPDATING POSITIONSSSSSSSS")
-        print("UPDATING POSITIONSSSSSSSS")
-        print("UPDATING POSITIONSSSSSSSS")
-        print("UPDATING POSITIONSSSSSSSS")
-
         tq_baselink_stereodown = np.array([0.57, -0.062, 0.505, 0.0, 0.0, 0.0, 1.0])
         t_baselink_stereodown = tq_baselink_stereodown[:3]
         q_baselink_stereodown = tq_baselink_stereodown[3:]
 
-        tq_stereodown_leftoptical = np.array([0.0, 0.0, 0.0, 0.0, 0.706825181105366, 0.7073882691671998, 1.0])
+        tq_stereodown_leftoptical = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.706825181105366, 0.7073882691671998])
         t_stereodown_leftoptical = tq_stereodown_leftoptical[:3]
         q_stereodown_leftoptical = tq_stereodown_leftoptical[3:]
 
