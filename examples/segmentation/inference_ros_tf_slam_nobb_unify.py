@@ -49,6 +49,7 @@ import ctypes
 from scipy.spatial.transform import Rotation as Rot
 import message_filters
 from std_msgs.msg import Int32
+from std_msgs.msg import Header
 #from dgcnn.msg import info_bbs
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Image
@@ -116,6 +117,7 @@ class Pointcloud_Seg:
         self.name = name
 
         self.new_pc = False
+        self.lock = False
 
         path_model = "log/pipes/s-001-sub6k"
 
@@ -208,6 +210,7 @@ class Pointcloud_Seg:
         self.pub_pc_inst = rospy.Publisher("/girona500/map_slamon/points2_inst", PointCloud2, queue_size=4)
         self.pub_pc_info = rospy.Publisher("/girona500/map_slamon/points2_info", PointCloud2, queue_size=4)
         self.pub_pc_info_world = rospy.Publisher("/girona500/map_slamon/points2_info_world", PointCloud2, queue_size=4)
+        self.pub_pc_info_slam_map = rospy.Publisher("/girona500/map_slamon/points2_info_slam_map", PointCloud2, queue_size=4)
 
         self.set_model()
 
@@ -226,8 +229,17 @@ class Pointcloud_Seg:
     def cb_loop(self, loop):
         if loop.data != self.loop:
             os.system(self.rsync_command)
-            self.loop = loop.data
-            self.update_positions()
+            print("loop is: " + str(self.loop))
+        if not self.lock:
+            self.lock = True
+            if loop.data != self.loop:
+                print("processing loop is: " + str(self.loop))
+                self.loop = loop.data
+                print("updating positions")
+                self.update_positions()
+                print("generating map")
+                self.get_map()
+            self.lock = False
 
 
     def set_model(self):
@@ -795,9 +807,9 @@ class Pointcloud_Seg:
             files = os.listdir(self.path_out)
 
             found = False
-            
-            for file in files:
-                name = file.split('_')[0]
+
+            for file_name in files:
+                name = file_name.split('_')[0]
                 header_float = float(name[:10] + '.' + name[10:])
 
                 time_dif = abs(ts_float-header_float)
@@ -830,6 +842,57 @@ class Pointcloud_Seg:
                     info_slam = [info_pipes_slam_list, info_connexions_slam_list, info_valves_slam_list, info_inst_pipe_slam_list]
                     conversion_utils.info_to_ply(info_slam, path_out_slam_info)
         file_tq.close()
+
+
+    def get_map(self):
+
+        info_pipes_slam_map_list = list()
+        info_connexions_slam_map_list = list()
+        info_valves_slam_map_list = list()
+        info_inst_pipe_slam_map_list = list()
+        info_slam_map = [info_pipes_slam_map_list, info_connexions_slam_map_list, info_valves_slam_map_list, info_inst_pipe_slam_map_list]
+        map_count = 0
+        map_count_target = 5       # each count_target, if has been a loop closing, (start from 0 and) use all info_slam.npy, if not, keep
+        map_count_thr = 1          # current info map and add info_world.npy on top of it (or do nothing)    `---> or with loop count > thr
+
+        for file_name in natsorted(os.listdir(self.path_out)):
+
+            if "_info_slam.npy" in file:
+
+                name = file_name.split('_')[0]
+                header_float = float(name[:10] + '.' + name[10:])
+
+                h = Header()
+                h.seq = map_count
+                h.stamp = rospy.Time(header_float)
+                h.frame_id = "world_ned"
+
+                map_count += 1
+
+                file_path = os.path.join(self.path_out, file_name)
+
+                print("im going to add to map: " + file_path)
+
+                info_array_slam = np.load(file_path)
+                info_pipes_slam_list, info_connexions_slam_list, info_valves_slam_list, info_inst_pipe_slam_list = conversion_utils.array_to_info(info_array_slam)
+
+                for i in range(len(info_valves_slam_list)):                         # create a list of valve types, so when valver are merged, the final 
+                    info_valves_slam_list[i].append([info_valves_slam_list[i][2]])  # type is the most common one in this list
+
+                info_slam = [info_pipes_slam_list, info_connexions_slam_list, info_valves_slam_list, info_inst_pipe_slam_list]
+                # print("INFO SLAM")
+                # print(info_slam)
+                info_slam_map = map_utils.get_info_map(info_slam_map, info_slam)
+
+                if map_count%map_count_target==0:
+                    info_slam_map = map_utils.clean_map(info_slam_map, map_count_thr)
+                    
+        path_out_slam_map = os.path.join(self.path_out, name+"_map.ply")
+        conversion_utils.info_to_ply(info_slam_map, path_out_slam_map)
+
+        info_slam_map_array = conversion_utils.info_to_array(info_slam_map)
+        pc_info_slam_map = self.array2pc_info(h, info_slam_map_array)
+        self.pub_pc_info_slam_map.publish(pc_info_slam_map)
 
         
     def quaternion_multiply(self, q0, q1):
